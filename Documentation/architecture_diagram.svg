@@ -1,0 +1,157 @@
+<svg width="1000" height="700" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <pattern id="dots" patternUnits="userSpaceOnUse" width="4" height="4">
+      <circle cx="2" cy="2" r="1" fill="#e0e0e0"/>
+    </pattern>
+    <linearGradient id="blueGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#4a90e2;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#357abd;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="greenGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#7ed321;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#5aa80f;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="orangeGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f5a623;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#d48806;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="1000" height="700" fill="#f8f9fa"/>
+  
+  <!-- Title -->
+  <text x="500" y="30" text-anchor="middle" font-family="Arial, sans-serif" font-size="24" font-weight="bold" fill="#2c3e50">NADC Migration Architecture</text>
+  <text x="500" y="55" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#7f8c8d">Hybrid Perl-Python Bridge for CPAN Dependencies</text>
+  
+  <!-- Environment Labels -->
+  <text x="250" y="90" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#e74c3c">RHEL 7 (Current)</text>
+  <text x="750" y="90" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#27ae60">RHEL 9 (Target)</text>
+  
+  <!-- Dividing line -->
+  <line x1="500" y1="100" x2="500" y2="650" stroke="#bdc3c7" stroke-width="2" stroke-dasharray="5,5"/>
+  
+  <!-- RHEL 7 Side (Left) -->
+  <!-- ControlM -->
+  <rect x="50" y="120" width="150" height="60" rx="5" fill="url(#blueGradient)" stroke="#2980b9" stroke-width="2"/>
+  <text x="125" y="140" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="white">ControlM</text>
+  <text x="125" y="155" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="white">Job Scheduler</text>
+  <text x="125" y="170" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="white">No Changes</text>
+  
+  <!-- Perl Scripts -->
+  <rect x="50" y="220" width="150" height="60" rx="5" fill="url(#orangeGradient)" stroke="#e67e22" stroke-width="2"/>
+  <text x="125" y="240" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="white">Perl Scripts</text>
+  <text x="125" y="255" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="white">Business Logic</text>
+  <text x="125" y="270" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="white">Direct CPAN Usage</text>
+  
+  <!-- CPAN Modules -->
+  <rect x="50" y="320" width="150" height="80" rx="5" fill="#e74c3c" stroke="#c0392b" stroke-width="2"/>
+  <text x="125" y="340" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="white">CPAN Modules</text>
+  <text x="125" y="355" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="white">DBI, XML::Simple</text>
+  <text x="125" y="370" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="white">Date::Parse, LWP</text>
+  <text x="125" y="385" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="white">Mail::Sender, etc.</text>
+  
+  <!-- Database -->
+  <rect x="50" y="440" width="150" height="60" rx="5" fill="#8e44ad" stroke="#7d3c98" stroke-width="2"/>
+  <text x="125" y="460" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="white">Oracle/Informix</text>
+  <text x="125" y="475" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="white">Databases</text>
+  <text x="125" y="490" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="white">External Services</text>
+  
+  <!-- RHEL 9 Side (Right) -->
+  <!-- ControlM -->
+  <rect x="550" y="120" width="150" height="60" rx="5" fill="url(#blueGradient)" stroke="#2980b9" stroke-width="2"/>
+  <text x="625" y="140" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="white">ControlM</text>
+  <text x="625" y="155" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="white">Job Scheduler</text>
+  <text x="625" y="170" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="white">Identical Jobs</text>
+  
+  <!-- Perl Scripts -->
+  <rect x="550" y="220" width="150" height="60" rx="5" fill="url(#orangeGradient)" stroke="#e67e22" stroke-width="2"/>
+  <text x="625" y="240" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="white">Perl Scripts</text>
+  <text x="625" y="255" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="white">Business Logic</text>
+  <text x="625" y="270" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="white">Uses Bridge</text>
+  
+  <!-- Bridge Layer -->
+  <rect x="750" y="220" width="200" height="120" rx="5" fill="url(#greenGradient)" stroke="#27ae60" stroke-width="2"/>
+  <text x="850" y="240" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="white">CPAN Bridge</text>
+  
+  <!-- Perl Bridge -->
+  <rect x="760" y="250" width="80" height="30" rx="3" fill="#ecf0f1" stroke="#95a5a6" stroke-width="1"/>
+  <text x="800" y="268" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#2c3e50">DBIHelper.pm</text>
+  
+  <rect x="860" y="250" width="80" height="30" rx="3" fill="#ecf0f1" stroke="#95a5a6" stroke-width="1"/>
+  <text x="900" y="268" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="#2c3e50">XMLHelper.pm</text>
+  
+  <!-- Communication Layer -->
+  <rect x="760" y="290" width="180" height="20" rx="3" fill="#f39c12" stroke="#e67e22" stroke-width="1"/>
+  <text x="850" y="303" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="white">JSON over Pipes</text>
+  
+  <!-- Python Bridge -->
+  <rect x="760" y="315" width="80" height="20" rx="3" fill="#3498db" stroke="#2980b9" stroke-width="1"/>
+  <text x="800" y="328" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="white">database.py</text>
+  
+  <rect x="860" y="315" width="80" height="20" rx="3" fill="#3498db" stroke="#2980b9" stroke-width="1"/>
+  <text x="900" y="328" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="white">xml.py</text>
+  
+  <!-- Python Modules -->
+  <rect x="550" y="380" width="150" height="80" rx="5" fill="#3498db" stroke="#2980b9" stroke-width="2"/>
+  <text x="625" y="400" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="white">Python Modules</text>
+  <text x="625" y="415" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="white">oracledb, requests</text>
+  <text x="625" y="430" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="white">xml.etree, smtplib</text>
+  <text x="625" y="445" text-anchor="middle" font-family="Arial, sans-serif" font-size="9" fill="white">dateutil, openpyxl</text>
+  
+  <!-- Database -->
+  <rect x="550" y="500" width="150" height="60" rx="5" fill="#8e44ad" stroke="#7d3c98" stroke-width="2"/>
+  <text x="625" y="520" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="white">Oracle/Informix</text>
+  <text x="625" y="535" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="white">Databases</text>
+  <text x="625" y="550" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="white">External Services</text>
+  
+  <!-- Arrows -->
+  <!-- RHEL 7 flow -->
+  <path d="M 125 180 L 125 220" stroke="#2c3e50" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
+  <path d="M 125 280 L 125 320" stroke="#2c3e50" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
+  <path d="M 125 400 L 125 440" stroke="#2c3e50" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
+  
+  <!-- RHEL 9 flow -->
+  <path d="M 625 180 L 625 220" stroke="#2c3e50" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
+  <path d="M 700 250 L 750 250" stroke="#2c3e50" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
+  <path d="M 625 340 L 625 380" stroke="#2c3e50" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
+  <path d="M 625 460 L 625 500" stroke="#2c3e50" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
+  
+  <!-- Bridge to Python -->
+  <path d="M 750 340 L 700 380" stroke="#27ae60" stroke-width="3" fill="none" marker-end="url(#arrowhead)"/>
+  
+  <!-- Migration arrow -->
+  <path d="M 250 300 Q 375 250 500 300" stroke="#e74c3c" stroke-width="4" fill="none" marker-end="url(#arrowhead)"/>
+  <text x="375" y="270" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="bold" fill="#e74c3c">Migration</text>
+  
+  <!-- Legend -->
+  <rect x="50" y="580" width="300" height="100" rx="5" fill="#ecf0f1" stroke="#bdc3c7" stroke-width="1"/>
+  <text x="60" y="600" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#2c3e50">Legend</text>
+  
+  <circle cx="70" cy="620" r="5" fill="#e74c3c"/>
+  <text x="85" y="625" font-family="Arial, sans-serif" font-size="10" fill="#2c3e50">Removed/Replaced</text>
+  
+  <circle cx="70" cy="640" r="5" fill="#27ae60"/>
+  <text x="85" y="645" font-family="Arial, sans-serif" font-size="10" fill="#2c3e50">New Bridge Components</text>
+  
+  <circle cx="70" cy="660" r="5" fill="#3498db"/>
+  <text x="85" y="665" font-family="Arial, sans-serif" font-size="10" fill="#2c3e50">Unchanged Components</text>
+  
+  <circle cx="200" cy="620" r="5" fill="#f39c12"/>
+  <text x="215" y="625" font-family="Arial, sans-serif" font-size="10" fill="#2c3e50">Communication Layer</text>
+  
+  <!-- Key Benefits -->
+  <rect x="650" y="580" width="300" height="100" rx="5" fill="#ecf0f1" stroke="#bdc3c7" stroke-width="1"/>
+  <text x="660" y="600" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#2c3e50">Key Benefits</text>
+  <text x="660" y="620" font-family="Arial, sans-serif" font-size="10" fill="#2c3e50">✓ Zero ControlM job changes</text>
+  <text x="660" y="635" font-family="Arial, sans-serif" font-size="10" fill="#2c3e50">✓ Minimal Perl script modifications</text>
+  <text x="660" y="650" font-family="Arial, sans-serif" font-size="10" fill="#2c3e50">✓ No CPAN dependencies on RHEL 9</text>
+  <text x="660" y="665" font-family="Arial, sans-serif" font-size="10" fill="#2c3e50">✓ Future-proof Python ecosystem</text>
+  
+  <!-- Arrow marker definition -->
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#2c3e50"/>
+    </marker>
+  </defs>
+</svg>
