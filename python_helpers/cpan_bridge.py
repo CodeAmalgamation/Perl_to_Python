@@ -14,6 +14,7 @@ import traceback
 import importlib
 import os
 from pathlib import Path
+from datetime import datetime  # FIX: Proper datetime import
 from typing import Dict, Any, Optional
 
 # Version info
@@ -26,8 +27,7 @@ MAX_REQUEST_SIZE = int(os.environ.get('CPAN_BRIDGE_MAX_SIZE', '10000000'))  # 10
 def debug_log(message: str, level: int = 1) -> None:
     """Log debug messages if debug level is sufficient"""
     if DEBUG >= level:
-        import datetime
-        timestamp = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         print(f"[{timestamp}] PYTHON DEBUG: {message}", file=sys.stderr)
         sys.stderr.flush()
 
@@ -59,6 +59,7 @@ def load_helper_modules() -> Dict[str, Any]:
         'email',        # Email sending
         'logging_helper', # Logging operations
         'excel',        # Excel file operations
+        'sftp',         # SFTP operations
         'test'          # For testing the bridge
     ]
     
@@ -165,7 +166,7 @@ def call_helper_function(modules: Dict[str, Any], request: Dict[str, Any]) -> Di
         'function': function_name,
         'execution_info': {
             'python_version': sys.version,
-            'timestamp': str(__import__('datetime').datetime.now())
+            'timestamp': str(datetime.now())  # FIX: Use proper datetime reference
         }
     }
 
