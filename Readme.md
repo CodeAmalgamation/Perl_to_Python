@@ -784,7 +784,7 @@ For issues or questions:
 
 ---
 
-**Migration Status**: 8 of 11 modules complete (73%)  
+**Migration Status**: 9 of 11 modules complete (82%)  
 **Last Updated**: December 2024
 
 ## Testing
