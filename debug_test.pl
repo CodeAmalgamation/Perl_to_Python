@@ -6,8 +6,8 @@ use warnings;
 use FindBin;
 use lib "$FindBin::Bin";
 
-# Enable debug mode
-$ENV{'CPAN_BRIDGE_DEBUG'} = 2;
+# Enable debug mode (start with level 1 to avoid JSON conflicts)
+$ENV{'CPAN_BRIDGE_DEBUG'} = 1;
 
 use DBIHelper;
 
