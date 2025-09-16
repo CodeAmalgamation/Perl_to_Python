@@ -17,16 +17,24 @@ except ImportError:
 _connections = {}
 _statements = {}
 
-def connect(dsn: str, username: str = '', password: str = '', options: Dict = None) -> Dict[str, Any]:
+def connect(dsn: str, username: str = '', password: str = '', options: Dict = None, db_type: str = '') -> Dict[str, Any]:
     """Connect to Oracle database using oracledb driver"""
     try:
         connection_id = str(uuid.uuid4())
+
+        # Handle Oracle TNS-in-username pattern: "dbi:Oracle:" with "user@TNS_NAME"
+        actual_username = username
+        if '@' in username:
+            actual_username, tns_name = username.split('@', 1)
+            # If DSN is minimal, use TNS from username
+            if dsn in ['dbi:Oracle:', 'dbi:Oracle', 'dbi:Ora:', 'dbi:Ora']:
+                dsn = tns_name
 
         # Parse Oracle connection details
         connection_params = _parse_oracle_dsn(dsn)
 
         # Connect to Oracle database
-        conn = _connect_oracle(connection_params, username, password, options)
+        conn = _connect_oracle(connection_params, actual_username, password, options)
         
         if not conn:
             raise RuntimeError("Failed to establish Oracle database connection")
@@ -36,7 +44,7 @@ def connect(dsn: str, username: str = '', password: str = '', options: Dict = No
             'connection': conn,
             'type': 'oracle',
             'dsn': dsn,
-            'username': username,
+            'username': actual_username,
             'autocommit': options.get('AutoCommit', True) if options else True,
             'raise_error': options.get('RaiseError', False) if options else False,
             'print_error': options.get('PrintError', True) if options else True,

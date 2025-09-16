@@ -92,12 +92,19 @@ def validate_request(request: Dict[str, Any]) -> bool:
             raise ValueError(f"Missing required field: {field}")
     
     # Basic security check - prevent dangerous function names
-    dangerous_patterns = ['__', 'eval', 'exec', 'import', 'open', 'file', 'system', 'subprocess']
+    dangerous_patterns = ['__', 'eval', 'import', 'subprocess']
+    dangerous_exact = ['exec', 'open', 'file', 'system']  # Exact matches only
     function_name = request['function'].lower()
     module_name = request['module'].lower()
-    
+
+    # Check substring patterns
     for pattern in dangerous_patterns:
         if pattern in function_name or pattern in module_name:
+            raise ValueError(f"Potentially dangerous function/module name: {request['module']}.{request['function']}")
+
+    # Check exact matches
+    for pattern in dangerous_exact:
+        if function_name == pattern or module_name == pattern:
             raise ValueError(f"Potentially dangerous function/module name: {request['module']}.{request['function']}")
     
     # Validate module name format
