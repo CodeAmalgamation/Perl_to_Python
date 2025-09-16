@@ -10,28 +10,47 @@ This project provides drop-in replacements for CPAN modules by routing operation
 
 ### System Flow
 ```mermaid
-flowchart TD
-    A[ControlM Jobs] --> B[Perl Scripts]
-    B --> C{Helper Module}
-    C --> D[CPANBridge.pm]
-    D --> E[cpan_bridge.py]
-    E --> F{Python Backend}
-
-    F --> G[database.py]
-    F --> H[email.py]
-    F --> I[xml.py]
-    F --> J[http.py]
-    F --> K[sftp.py]
-    F --> L[excel.py]
-    F --> M[logging_helper.py]
-
-    G --> N[(Database)]
-    H --> O[SMTP Server]
-    I --> P[XML Files]
-    J --> Q[HTTP APIs]
-    K --> R[SFTP Servers]
-    L --> S[Excel Files]
-    M --> T[Log Files]
+graph TD
+    A[ControlM Job] --> B[Perl Script]
+    B --> C{Module Type}
+    
+    C -->|Database| D[DBIHelper.pm]
+    C -->|Email| E[MailHelper.pm]
+    C -->|XML| F[XMLHelper.pm]
+    C -->|Date| G[DateHelper.pm]
+    C -->|HTTP| H[HTTPHelper.pm]
+    
+    D --> I[CPANBridge.pm]
+    E --> I
+    F --> I
+    G --> I
+    H --> I
+    
+    I --> J[cpan_bridge.py]
+    J --> K{Route Request}
+    
+    K -->|database| L[helpers/database.py]
+    K -->|email| M[helpers/email.py]
+    K -->|xml| N[helpers/xml.py]
+    K -->|dates| O[helpers/dates.py]
+    K -->|http| P[helpers/http.py]
+    
+    L --> Q[Oracle/Informix DB]
+    M --> R[SMTP Server]
+    N --> S[XML Processing]
+    O --> T[Date Calculations]
+    P --> U[HTTP Services]
+    
+    Q --> V[JSON Response]
+    R --> V
+    S --> V
+    T --> V
+    U --> V
+    
+    V --> J
+    J --> I
+    I --> B
+    B --> A
 ```
 
 ### Communication Flow
