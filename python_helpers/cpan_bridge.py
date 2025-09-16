@@ -123,7 +123,7 @@ def call_helper_function(modules: Dict[str, Any], request: Dict[str, Any]) -> Di
     function_name = request['function']
     params = request.get('params', {})
     
-    debug_log(f"Calling {module_name}.{function_name} with params: {params}", level=2)
+    debug_log(f"Calling {module_name}.{function_name} with params: {params}", level=1)
     
     # Check if module is available
     if module_name not in modules:
@@ -164,7 +164,7 @@ def call_helper_function(modules: Dict[str, Any], request: Dict[str, Any]) -> Di
         # Re-raise with more context
         raise RuntimeError(f"Error in {module_name}.{function_name}: {str(e)}") from e
     
-    debug_log(f"Function {module_name}.{function_name} completed successfully", level=2)
+    debug_log(f"Function {module_name}.{function_name} completed successfully, returning: {result}", level=1)
     
     return {
         'success': True,
