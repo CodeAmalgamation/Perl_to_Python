@@ -8,6 +8,33 @@ This project provides drop-in replacements for CPAN modules by routing operation
 
 ## Architecture
 
+### System Flow
+```mermaid
+flowchart TD
+    A[ControlM Jobs] --> B[Perl Scripts]
+    B --> C{Helper Module}
+    C --> D[CPANBridge.pm]
+    D --> E[cpan_bridge.py]
+    E --> F{Python Backend}
+
+    F --> G[database.py]
+    F --> H[email.py]
+    F --> I[xml.py]
+    F --> J[http.py]
+    F --> K[sftp.py]
+    F --> L[excel.py]
+    F --> M[logging_helper.py]
+
+    G --> N[(Database)]
+    H --> O[SMTP Server]
+    I --> P[XML Files]
+    J --> Q[HTTP APIs]
+    K --> R[SFTP Servers]
+    L --> S[Excel Files]
+    M --> T[Log Files]
+```
+
+### Communication Flow
 ```
 ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
 │  ControlM   │───▶│    Perl     │───▶│   Helper    │───▶│    CPAN     │───▶│   Python    │
