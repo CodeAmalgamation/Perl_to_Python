@@ -193,7 +193,13 @@ def execute_statement(connection_id: str, statement_id: str, bind_values: List =
             cursor.execute(stmt_info['sql'], final_bind_values)
         else:
             cursor.execute(stmt_info['sql'])
-        
+
+        # Debug: Log execution details
+        import sys
+        print(f"DEBUG: Executed SQL: {stmt_info['sql']}", file=sys.stderr)
+        print(f"DEBUG: Cursor description after execute: {cursor.description}", file=sys.stderr)
+        print(f"DEBUG: Cursor rowcount after execute: {getattr(cursor, 'rowcount', 'unknown')}", file=sys.stderr)
+
         stmt_info['executed'] = True
         
         # Get enhanced column information
@@ -234,8 +240,23 @@ def fetch_row(connection_id: str, statement_id: str, format: str = 'array') -> D
             return {'success': False}
         
         cursor = stmt_info['cursor']
-        row = cursor.fetchone()
-        
+
+        # Debug: Check cursor state
+        try:
+            row = cursor.fetchone()
+
+            # Debug logging (only if row is None when it shouldn't be)
+            if row is None and hasattr(cursor, 'description') and cursor.description:
+                # There's column info but no data - this is suspicious
+                import sys
+                print(f"DEBUG: fetchone() returned None but cursor has description: {cursor.description}", file=sys.stderr)
+                print(f"DEBUG: cursor.rowcount: {getattr(cursor, 'rowcount', 'unknown')}", file=sys.stderr)
+
+        except Exception as fetch_error:
+            import sys
+            print(f"DEBUG: fetchone() failed: {fetch_error}", file=sys.stderr)
+            row = None
+
         if row is None:
             stmt_info['finished'] = True
             return {'success': False}
