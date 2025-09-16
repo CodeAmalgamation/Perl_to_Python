@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Direct test for database.py Oracle connectivity
+Direct test for database.py Oracle-only connectivity using oracledb driver
 Usage: python test_oracle_direct.py
 """
 
@@ -109,53 +109,38 @@ def test_dsn_parsing():
     for dsn in test_dsns:
         print(f"\nParsing DSN: {dsn}")
         try:
-            from database import _parse_oracle_dsn, parse_dsn
+            from database import _parse_oracle_dsn
 
-            # Test general DSN parsing
-            db_type, conn_string = parse_dsn(dsn)
-            print(f"  Type: {db_type}, Connection: {conn_string}")
-
-            # Test Oracle-specific parsing
-            if db_type == 'oracle':
-                oracle_params = _parse_oracle_dsn(dsn)
-                print(f"  Oracle params: {oracle_params}")
+            # Test Oracle DSN parsing
+            oracle_params = _parse_oracle_dsn(dsn)
+            print(f"  Oracle params: {oracle_params}")
 
         except Exception as e:
             print(f"  ❌ Error: {e}")
 
 def check_oracle_drivers():
-    """Check available Oracle drivers"""
+    """Check oracledb driver availability"""
 
-    print("\n🔍 Checking Oracle drivers...")
-
-    drivers = []
+    print("\n🔍 Checking Oracle driver...")
 
     try:
         import oracledb
-        drivers.append(f"✅ oracledb: {oracledb.__version__}")
+        print(f"  ✅ oracledb: {oracledb.__version__}")
+        return True
     except ImportError:
-        drivers.append("❌ oracledb: Not available")
-
-    try:
-        import cx_Oracle
-        drivers.append(f"✅ cx_Oracle: {cx_Oracle.__version__}")
-    except ImportError:
-        drivers.append("❌ cx_Oracle: Not available")
-
-    for driver in drivers:
-        print(f"  {driver}")
-
-    if not any("✅" in driver for driver in drivers):
-        print("\n⚠️  No Oracle drivers found. Install with:")
-        print("    pip install oracledb  # Recommended")
-        print("    pip install cx_Oracle  # Legacy")
+        print("  ❌ oracledb: Not available")
+        print("\n⚠️  oracledb driver not found. Install with:")
+        print("    pip install oracledb")
+        return False
 
 if __name__ == "__main__":
     print("🔗 Oracle Database Direct Test")
     print("=" * 40)
 
     # Check drivers first
-    check_oracle_drivers()
+    if not check_oracle_drivers():
+        print("\n❌ Cannot proceed without oracledb driver")
+        sys.exit(1)
 
     # Test DSN parsing
     test_dsn_parsing()
