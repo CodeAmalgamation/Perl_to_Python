@@ -201,8 +201,9 @@ def execute_statement(connection_id: str, statement_id: str, bind_values: List =
         print(f"DEBUG: Cursor rowcount after execute: {getattr(cursor, 'rowcount', 'unknown')}", file=sys.stderr, flush=True)
 
         stmt_info['executed'] = True
-        
+
         # Get enhanced column information
+        # For Oracle, description may only be available after a peek at the result
         column_info = None
         if hasattr(cursor, 'description') and cursor.description:
             column_info = {
@@ -210,7 +211,30 @@ def execute_statement(connection_id: str, statement_id: str, bind_values: List =
                 'names': [desc[0] for desc in cursor.description],
                 'types': [desc[1] if len(desc) > 1 else None for desc in cursor.description]
             }
-        
+        else:
+            # Try to peek at cursor to populate description (Oracle behavior)
+            try:
+                # Save current position, peek, then restore
+                original_arraysize = getattr(cursor, 'arraysize', 1)
+                cursor.arraysize = 1
+                peek_row = cursor.fetchone()
+
+                if peek_row is not None and hasattr(cursor, 'description') and cursor.description:
+                    column_info = {
+                        'count': len(cursor.description),
+                        'names': [desc[0] for desc in cursor.description],
+                        'types': [desc[1] if len(desc) > 1 else None for desc in cursor.description]
+                    }
+                    # Store the peeked row for later retrieval
+                    stmt_info['peeked_row'] = peek_row
+
+                cursor.arraysize = original_arraysize
+
+            except Exception as peek_error:
+                # If peek fails, continue without column info
+                import sys
+                print(f"DEBUG: Peek failed: {peek_error}", file=sys.stderr, flush=True)
+
         rows_affected = getattr(cursor, 'rowcount', 0)
         
         return {
@@ -241,21 +265,26 @@ def fetch_row(connection_id: str, statement_id: str, format: str = 'array') -> D
         
         cursor = stmt_info['cursor']
 
-        # Debug: Check cursor state
-        try:
-            row = cursor.fetchone()
+        # Check if we have a peeked row from execute_statement
+        if 'peeked_row' in stmt_info:
+            row = stmt_info['peeked_row']
+            del stmt_info['peeked_row']  # Remove it so it's only returned once
+        else:
+            # Debug: Check cursor state
+            try:
+                row = cursor.fetchone()
 
-            # Debug logging (only if row is None when it shouldn't be)
-            if row is None and hasattr(cursor, 'description') and cursor.description:
-                # There's column info but no data - this is suspicious
+                # Debug logging (only if row is None when it shouldn't be)
+                if row is None and hasattr(cursor, 'description') and cursor.description:
+                    # There's column info but no data - this is suspicious
+                    import sys
+                    print(f"DEBUG: fetchone() returned None but cursor has description: {cursor.description}", file=sys.stderr, flush=True)
+                    print(f"DEBUG: cursor.rowcount: {getattr(cursor, 'rowcount', 'unknown')}", file=sys.stderr, flush=True)
+
+            except Exception as fetch_error:
                 import sys
-                print(f"DEBUG: fetchone() returned None but cursor has description: {cursor.description}", file=sys.stderr, flush=True)
-                print(f"DEBUG: cursor.rowcount: {getattr(cursor, 'rowcount', 'unknown')}", file=sys.stderr, flush=True)
-
-        except Exception as fetch_error:
-            import sys
-            print(f"DEBUG: fetchone() failed: {fetch_error}", file=sys.stderr, flush=True)
-            row = None
+                print(f"DEBUG: fetchone() failed: {fetch_error}", file=sys.stderr, flush=True)
+                row = None
 
         if row is None:
             stmt_info['finished'] = True
