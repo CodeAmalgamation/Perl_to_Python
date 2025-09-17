@@ -367,40 +367,70 @@ def execute_statement(connection_id: str, statement_id: str, bind_values: List =
 
         stmt_info['executed'] = True
 
-        # Get enhanced column information
-        # For Oracle, description may only be available after a peek at the result
+        # Detect SQL statement type for Oracle-specific handling
+        sql_upper = stmt_info['sql'].strip().upper()
+        is_select = sql_upper.startswith('SELECT')
+
+        # Get enhanced column information with Oracle-specific handling
         column_info = None
-        if hasattr(cursor, 'description') and cursor.description:
-            column_info = {
-                'count': len(cursor.description),
-                'names': [desc[0] for desc in cursor.description],
-                'types': [desc[1] if len(desc) > 1 else None for desc in cursor.description]
-            }
-        else:
-            # Try to peek at cursor to populate description (Oracle behavior)
-            try:
-                # Save current position, peek, then restore
-                original_arraysize = getattr(cursor, 'arraysize', 1)
-                cursor.arraysize = 1
-                peek_row = cursor.fetchone()
-
-                if peek_row is not None and hasattr(cursor, 'description') and cursor.description:
-                    column_info = {
-                        'count': len(cursor.description),
-                        'names': [desc[0] for desc in cursor.description],
-                        'types': [desc[1] if len(desc) > 1 else None for desc in cursor.description]
-                    }
-                    # Store the peeked row for later retrieval
-                    stmt_info['peeked_row'] = peek_row
-
-                cursor.arraysize = original_arraysize
-
-            except Exception as peek_error:
-                # If peek fails, continue without column info
-                import sys
-                print(f"DEBUG: Peek failed: {peek_error}", file=sys.stderr, flush=True)
-
         rows_affected = getattr(cursor, 'rowcount', 0)
+
+        if is_select:
+            # For SELECT statements, Oracle needs special handling
+            print(f"DEBUG: Processing SELECT statement", file=sys.stderr, flush=True)
+
+            if hasattr(cursor, 'description') and cursor.description:
+                # Description is already available
+                column_info = {
+                    'count': len(cursor.description),
+                    'names': [desc[0] for desc in cursor.description],
+                    'types': [desc[1] if len(desc) > 1 else None for desc in cursor.description]
+                }
+                print(f"DEBUG: Column info available immediately: {column_info['count']} columns", file=sys.stderr, flush=True)
+            else:
+                # Try to peek at cursor to populate description (Oracle behavior)
+                print(f"DEBUG: Column info not available, attempting peek", file=sys.stderr, flush=True)
+                try:
+                    original_arraysize = getattr(cursor, 'arraysize', 1)
+                    cursor.arraysize = 1
+                    peek_row = cursor.fetchone()
+
+                    if peek_row is not None and hasattr(cursor, 'description') and cursor.description:
+                        column_info = {
+                            'count': len(cursor.description),
+                            'names': [desc[0] for desc in cursor.description],
+                            'types': [desc[1] if len(desc) > 1 else None for desc in cursor.description]
+                        }
+                        # Store the peeked row for later retrieval
+                        stmt_info['peeked_row'] = peek_row
+                        print(f"DEBUG: Peek successful: {column_info['count']} columns, row data available", file=sys.stderr, flush=True)
+
+                        # For SELECT with data, set rows_affected = 1 (indicates data available)
+                        rows_affected = 1
+                    else:
+                        print(f"DEBUG: Peek returned no data", file=sys.stderr, flush=True)
+                        rows_affected = 0
+
+                    cursor.arraysize = original_arraysize
+
+                except Exception as peek_error:
+                    print(f"DEBUG: Peek failed: {peek_error}", file=sys.stderr, flush=True)
+                    rows_affected = 0
+
+        else:
+            # For non-SELECT statements (INSERT, UPDATE, DELETE, etc.)
+            print(f"DEBUG: Processing non-SELECT statement", file=sys.stderr, flush=True)
+
+            # Try to get column info if available (some statements might return data)
+            if hasattr(cursor, 'description') and cursor.description:
+                column_info = {
+                    'count': len(cursor.description),
+                    'names': [desc[0] for desc in cursor.description],
+                    'types': [desc[1] if len(desc) > 1 else None for desc in cursor.description]
+                }
+                print(f"DEBUG: Non-SELECT statement has column info: {column_info['count']} columns", file=sys.stderr, flush=True)
+
+            # rows_affected from rowcount is typically reliable for non-SELECT statements
         
         return {
             'success': True,

@@ -115,7 +115,18 @@ sub connect {
     }
     
     # Success - configure handle
-    $self->{connection_id} = $result->{connection_id};
+    # Extract connection_id from nested result structure (CPANBridge wraps results)
+    my $connection_id;
+    if ($result->{result} && $result->{result}->{connection_id}) {
+        $connection_id = $result->{result}->{connection_id};
+    } elsif ($result->{connection_id}) {
+        $connection_id = $result->{connection_id};
+    } else {
+        $self->_set_error("Connection ID not found in result structure");
+        return 1;  # Return 1 for FAILURE
+    }
+
+    $self->{connection_id} = $connection_id;
     $self->{connected} = 1;
     $self->{Active} = 1;
     
@@ -459,19 +470,39 @@ sub execute {
     
     $self->{executed} = 1;
     
-    # Set column metadata from result
-    if ($result->{column_info}) {
-        $self->{NUM_OF_FIELDS} = $result->{column_info}->{count} || 0;
-        $self->{NAME} = $result->{column_info}->{names} || [];
-        $self->{TYPE} = $result->{column_info}->{types} || [];
-        $self->{NAME_uc} = [map { uc($_) } @{$self->{NAME}}];
+    # Set column metadata from result (handle nested structure)
+    my $column_info;
+    if ($result->{result} && $result->{result}->{column_info}) {
+        $column_info = $result->{result}->{column_info};
+    } elsif ($result->{column_info}) {
+        $column_info = $result->{column_info};
     }
-    
-    # Set row count
-    $self->{rows} = $result->{rows_affected} || 0;
-    
+
+    if ($column_info) {
+        $self->{NUM_OF_FIELDS} = $column_info->{count} || 0;
+        $self->{NAME} = $column_info->{names} || [];
+        $self->{TYPE} = $column_info->{types} || [];
+        $self->{NAME_uc} = [map { uc($_) } @{$self->{NAME}}];
+    } else {
+        # No column info available (common for non-SELECT statements)
+        $self->{NUM_OF_FIELDS} = 0;
+        $self->{NAME} = [];
+        $self->{TYPE} = [];
+        $self->{NAME_uc} = [];
+    }
+
+    # Set row count (handle nested structure)
+    my $rows_affected;
+    if ($result->{result} && defined $result->{result}->{rows_affected}) {
+        $rows_affected = $result->{result}->{rows_affected};
+    } elsif (defined $result->{rows_affected}) {
+        $rows_affected = $result->{rows_affected};
+    } else {
+        $rows_affected = 0;
+    }
+    $self->{rows} = $rows_affected;
+
     # Return DBI-compatible value
-    my $rows_affected = $result->{rows_affected} || 0;
     
     if ($rows_affected == 0) {
         return "0E0";  # DBI standard for zero rows
