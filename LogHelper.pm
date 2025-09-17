@@ -104,31 +104,67 @@ use base 'CPANBridge';
 
 sub new {
     my ($class, $category) = @_;
-    
+
     my $self = $class->SUPER::new();
-    
+
     $self->{category} = $category || 'main';
     $self->{level} = LogHelper::INFO();
     $self->{appenders} = [];
     $self->{layouts} = {};
-    
+
+    # Initialize logger in Python backend
+    my $result = $self->call_python('logging_helper', 'init_logger', {
+        category => $self->{category},
+        level => 'INFO',
+        caller_depth => 1
+    });
+
+    if ($result->{success}) {
+        $self->{logger_id} = $result->{result}->{logger_id};
+    } else {
+        warn "Failed to initialize logger: " . ($result->{error} || 'unknown error');
+    }
+
     return $self;
 }
 
 # Level management (your pattern)
 sub level {
     my ($self, $new_level) = @_;
-    
+
     if (defined $new_level) {
         $self->{level} = $new_level;
+
+        # Update level in Python backend
+        my $level_name = _numeric_to_level_name($new_level);
+        if ($self->{logger_id} && $level_name) {
+            $self->call_python('logging_helper', 'set_level', {
+                logger_id => $self->{logger_id},
+                level => $level_name
+            });
+        }
     }
-    
+
     return $self->{level};
 }
 
 sub getlevel {
     my $self = shift;
     return $self->{level};
+}
+
+# Helper function to convert numeric level to name
+sub _numeric_to_level_name {
+    my $numeric = shift;
+
+    return 'TRACE' if $numeric == LogHelper::TRACE();
+    return 'DEBUG' if $numeric == LogHelper::DEBUG();
+    return 'INFO'  if $numeric == LogHelper::INFO();
+    return 'WARN'  if $numeric == LogHelper::WARN();
+    return 'ERROR' if $numeric == LogHelper::ERROR();
+    return 'FATAL' if $numeric == LogHelper::FATAL();
+
+    return 'INFO';  # Default fallback
 }
 
 # Appender management
@@ -172,7 +208,21 @@ sub fatal {
 
 sub logdie {
     my ($self, $message) = @_;
-    $self->fatal($message);
+
+    # Get caller information
+    my $depth = $LogHelper::CALLER_DEPTH + 1;
+    my ($package, $filename, $line) = caller($depth);
+
+    # Call Python backend logdie function
+    my $result = $self->call_python('logging_helper', 'logdie', {
+        logger_id => $self->{logger_id},
+        message => $message,
+        filename => $filename,
+        line => $line,
+        package => $package,
+        enhanced => 1
+    });
+
     die $message;
 }
 
@@ -210,28 +260,29 @@ sub is_fatal {
 # Internal logging method
 sub _log {
     my ($self, $msg_level, $level_name, $message) = @_;
-    
+
     return if $msg_level < $self->{level};
-    
+
     # Get caller information (your enhanced formatting pattern)
     my $depth = $LogHelper::CALLER_DEPTH + 1;
     my ($package, $filename, $line) = caller($depth);
-    
+
     # Prepare log parameters
     my $params = {
-        category => $self->{category},
-        level => $level_name,
+        logger_id => $self->{logger_id},
         message => $message,
         filename => $filename,
         line => $line,
         package => $package,
-        timestamp => time(),
-        appenders => $self->{appenders},
+        enhanced => ($level_name =~ /^(DEBUG|ERROR|FATAL)$/ ? 1 : 0)
     };
-    
+
+    # Call appropriate logging function based on level
+    my $function_name = "log_" . lc($level_name);
+
     # Send to Python backend for formatting and output
-    my $result = $self->call_python('logging', 'log_message', $params);
-    
+    my $result = $self->call_python('logging_helper', $function_name, $params);
+
     if (!$result->{success}) {
         # Fallback to simple print if backend fails
         warn "LogHelper backend error: " . ($result->{error} || 'unknown');
