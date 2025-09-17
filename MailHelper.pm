@@ -118,7 +118,7 @@ sub Close {
     };
     
     # Send via bridge
-    my $result = $self->{bridge}->call_python('email', 'send_multipart', $email_data);
+    my $result = $self->{bridge}->call_python('email_helper', 'send_multipart', $email_data);
     
     if (!$result->{success}) {
         $Error = $result->{error};
@@ -149,7 +149,7 @@ sub MailFile {
         return -1;
     }
     
-    my $result = $self->{bridge}->call_python('email', 'send_with_file', $email_data);
+    my $result = $self->{bridge}->call_python('email_helper', 'send_with_file', $email_data);
     
     if (!$result->{success}) {
         $Error = $result->{error};
@@ -172,7 +172,7 @@ sub MailMsg {
         msg => $params->{msg} || '',
     };
     
-    my $result = $self->{bridge}->call_python('email', 'send_simple', $email_data);
+    my $result = $self->{bridge}->call_python('email_helper', 'send_simple', $email_data);
     
     if (!$result->{success}) {
         $Error = $result->{error};
