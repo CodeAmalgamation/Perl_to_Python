@@ -732,28 +732,36 @@ def fetch_row(connection_id: str, statement_id: str, format: str = 'array') -> D
         cursor = stmt_info['cursor']
 
         # Check if we have a peeked row from execute_statement
+        debug_fetch_info = f"peeked_row_exists={('peeked_row' in stmt_info)}"
+        if 'peeked_row' in stmt_info:
+            debug_fetch_info += f", peeked_row_value={repr(stmt_info['peeked_row'])}"
+
         if 'peeked_row' in stmt_info and stmt_info['peeked_row'] is not None:
             row = stmt_info['peeked_row']
             del stmt_info['peeked_row']  # Remove it so it's only returned once
+            debug_fetch_info += ", used_peeked_row=True"
         else:
+            debug_fetch_info += ", used_peeked_row=False"
             # Debug: Check cursor state
             try:
                 row = cursor.fetchone()
+                debug_fetch_info += f", fetchone_result={repr(row)}"
 
                 # Debug logging (only if row is None when it shouldn't be)
                 if row is None and hasattr(cursor, 'description') and cursor.description:
-                    # There's column info but no data - this is suspicious
-                    import sys
-                    # fetchone() returned None but cursor has description
+                    debug_fetch_info += ", cursor_has_description=True"
 
             except Exception as fetch_error:
-                import sys
-                # fetchone() failed
+                debug_fetch_info += f", fetchone_error={str(fetch_error)}"
                 row = None
 
         if row is None:
             stmt_info['finished'] = True
-            return {'success': False}
+            return {
+                'success': False,
+                'debug_fetch_info': debug_fetch_info,
+                'statement_executed': stmt_info.get('executed', False)
+            }
         
         if format == 'hash' and hasattr(cursor, 'description'):
             # Convert to dictionary
