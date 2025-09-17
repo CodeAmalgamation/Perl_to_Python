@@ -139,6 +139,147 @@ def _restore_connection_from_metadata(metadata: Dict[str, Any]) -> Optional[Any]
         # If connection restoration fails, the metadata is stale
         return None
 
+def _save_statement_metadata(statement_id: str, metadata: Dict[str, Any]):
+    """Save statement metadata to persistent storage"""
+    try:
+        _ensure_persistence_dir()
+        metadata_file = os.path.join(_PERSISTENCE_DIR, f"stmt_{statement_id}.json")
+
+        # Store statement metadata (cursor can't be serialized)
+        persistent_metadata = {
+            'statement_id': statement_id,
+            'connection_id': metadata.get('connection_id'),
+            'sql': metadata.get('sql'),
+            'executed': metadata.get('executed', False),
+            'finished': metadata.get('finished', False),
+            'created_at': time.time(),
+            'last_used': time.time()
+        }
+
+        with open(metadata_file, 'w') as f:
+            json.dump(persistent_metadata, f)
+
+        return True
+    except Exception:
+        return False
+
+def _load_statement_metadata(statement_id: str) -> Optional[Dict[str, Any]]:
+    """Load statement metadata from persistent storage"""
+    try:
+        metadata_file = os.path.join(_PERSISTENCE_DIR, f"stmt_{statement_id}.json")
+
+        if not os.path.exists(metadata_file):
+            return None
+
+        with open(metadata_file, 'r') as f:
+            metadata = json.load(f)
+
+        # Check if statement has expired
+        if time.time() - metadata.get('created_at', 0) > _CONNECTION_TIMEOUT:
+            os.unlink(metadata_file)  # Remove expired metadata
+            return None
+
+        # Update last used time
+        metadata['last_used'] = time.time()
+        with open(metadata_file, 'w') as f:
+            json.dump(metadata, f)
+
+        return metadata
+    except Exception:
+        return None
+
+def _remove_statement_metadata(statement_id: str):
+    """Remove statement metadata from persistent storage"""
+    try:
+        metadata_file = os.path.join(_PERSISTENCE_DIR, f"stmt_{statement_id}.json")
+        if os.path.exists(metadata_file):
+            os.unlink(metadata_file)
+    except Exception:
+        pass
+
+def _restore_statement_from_metadata(statement_metadata: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Restore statement from metadata by recreating cursor"""
+    try:
+        connection_id = statement_metadata['connection_id']
+
+        # Ensure connection is available (restore if needed)
+        if connection_id not in _connections:
+            # Load and restore connection first
+            conn_metadata = _load_connection_metadata(connection_id)
+            if not conn_metadata:
+                return None
+
+            conn = _restore_connection_from_metadata(conn_metadata)
+            if not conn:
+                return None
+
+            # Store restored connection in memory
+            _connections[connection_id] = {
+                'connection': conn,
+                'type': conn_metadata['type'],
+                'dsn': conn_metadata['dsn'],
+                'username': conn_metadata['username'],
+                'autocommit': conn_metadata['autocommit'],
+                'raise_error': conn_metadata['raise_error'],
+                'print_error': conn_metadata['print_error']
+            }
+
+        # Recreate statement info (cursor will be created fresh)
+        restored_statement = {
+            'connection_id': connection_id,
+            'sql': statement_metadata['sql'],
+            'cursor': None,  # Will be created on demand
+            'executed': False,  # Reset execution state (cursor is fresh)
+            'finished': False,
+            'peeked_row': None  # Reset any cached data
+        }
+
+        return restored_statement
+
+    except Exception:
+        return None
+
+def _ensure_connection_available(connection_id: str) -> Dict[str, Any]:
+    """Helper function to ensure connection is available (restore if needed)"""
+    if connection_id not in _connections:
+        debug_info = f"Connection {connection_id} not in memory, attempting to restore from persistent storage"
+
+        # Load connection metadata from persistent storage
+        metadata = _load_connection_metadata(connection_id)
+        if not metadata:
+            return {
+                'success': False,
+                'error': 'Invalid connection ID',
+                'debug_info': f'Connection {connection_id} not found in persistent storage'
+            }
+
+        # Restore connection from metadata
+        conn = _restore_connection_from_metadata(metadata)
+        if not conn:
+            _remove_connection_metadata(connection_id)  # Remove stale metadata
+            return {
+                'success': False,
+                'error': 'Failed to restore connection - credentials may have changed',
+                'debug_info': 'Connection restoration failed'
+            }
+
+        # Store restored connection in memory
+        _connections[connection_id] = {
+            'connection': conn,
+            'type': metadata['type'],
+            'dsn': metadata['dsn'],
+            'username': metadata['username'],
+            'autocommit': metadata['autocommit'],
+            'raise_error': metadata['raise_error'],
+            'print_error': metadata['print_error']
+        }
+
+        debug_info += " - Connection successfully restored"
+    else:
+        debug_info = f"Connection {connection_id} found in memory"
+
+    return {'success': True, 'debug_info': debug_info}
+
 def connect(dsn: str, username: str = '', password: str = '', options: Dict = None, db_type: str = '') -> Dict[str, Any]:
     """Connect to Oracle database using oracledb driver"""
     try:
@@ -255,20 +396,59 @@ def _parse_oracle_dsn(dsn: str) -> Dict[str, str]:
 def prepare(connection_id: str, sql: str) -> Dict[str, Any]:
     """Prepare SQL statement"""
     try:
+        # Try to restore connection if not in memory
         if connection_id not in _connections:
-            raise ValueError("Invalid connection ID")
-        
+            debug_info = f"Connection {connection_id} not in memory, attempting to restore from persistent storage"
+
+            # Load connection metadata from persistent storage
+            metadata = _load_connection_metadata(connection_id)
+            if not metadata:
+                return {
+                    'success': False,
+                    'error': 'Invalid connection ID',
+                    'debug_info': f'Connection {connection_id} not found in persistent storage'
+                }
+
+            # Restore connection from metadata
+            conn = _restore_connection_from_metadata(metadata)
+            if not conn:
+                _remove_connection_metadata(connection_id)  # Remove stale metadata
+                return {
+                    'success': False,
+                    'error': 'Failed to restore connection - credentials may have changed',
+                    'debug_info': 'Connection restoration failed'
+                }
+
+            # Store restored connection in memory
+            _connections[connection_id] = {
+                'connection': conn,
+                'type': metadata['type'],
+                'dsn': metadata['dsn'],
+                'username': metadata['username'],
+                'autocommit': metadata['autocommit'],
+                'raise_error': metadata['raise_error'],
+                'print_error': metadata['print_error']
+            }
+
+            debug_info += " - Connection successfully restored"
+        else:
+            debug_info = f"Connection {connection_id} found in memory"
+
         statement_id = str(uuid.uuid4())
         conn_info = _connections[connection_id]
-        
+
         # Store statement info (cursor will be created on execute)
-        _statements[statement_id] = {
+        statement_metadata = {
             'connection_id': connection_id,
             'sql': sql,
             'cursor': None,
             'executed': False,
             'finished': False
         }
+        _statements[statement_id] = statement_metadata
+
+        # Save statement metadata to persistent storage for cross-process access
+        _save_statement_metadata(statement_id, statement_metadata)
         
         return {
             'success': True,
@@ -448,8 +628,41 @@ def execute_statement(connection_id: str, statement_id: str, bind_values: List =
 def fetch_row(connection_id: str, statement_id: str, format: str = 'array') -> Dict[str, Any]:
     """Fetch single row with enhanced tracking"""
     try:
+        # Try to restore statement if not in memory
         if statement_id not in _statements:
-            raise ValueError("Invalid statement ID")
+            debug_info = f"Statement {statement_id} not in memory, attempting to restore from persistent storage"
+
+            # Load statement metadata from persistent storage
+            stmt_metadata = _load_statement_metadata(statement_id)
+            if not stmt_metadata:
+                return {
+                    'success': False,
+                    'error': 'Invalid statement ID',
+                    'debug_info': f'Statement {statement_id} not found in persistent storage'
+                }
+
+            # Restore statement from metadata (this also restores connection if needed)
+            restored_statement = _restore_statement_from_metadata(stmt_metadata)
+            if not restored_statement:
+                _remove_statement_metadata(statement_id)  # Remove stale metadata
+                return {
+                    'success': False,
+                    'error': 'Failed to restore statement - connection may have expired',
+                    'debug_info': 'Statement restoration failed'
+                }
+
+            # Store restored statement in memory
+            _statements[statement_id] = restored_statement
+
+            # Note: Statement needs to be re-executed after restoration
+            return {
+                'success': False,
+                'error': 'Statement restored but must be re-executed',
+                'debug_info': 'Statement restoration successful but execution state lost'
+            }
+
+        else:
+            debug_info = f"Statement {statement_id} found in memory"
         
         stmt_info = _statements[statement_id]
         
@@ -504,8 +717,41 @@ def fetch_row(connection_id: str, statement_id: str, format: str = 'array') -> D
 def fetch_all(connection_id: str, statement_id: str, format: str = 'array') -> Dict[str, Any]:
     """Fetch all remaining rows"""
     try:
+        # Try to restore statement if not in memory (same logic as fetch_row)
         if statement_id not in _statements:
-            raise ValueError("Invalid statement ID")
+            debug_info = f"Statement {statement_id} not in memory, attempting to restore from persistent storage"
+
+            # Load statement metadata from persistent storage
+            stmt_metadata = _load_statement_metadata(statement_id)
+            if not stmt_metadata:
+                return {
+                    'success': False,
+                    'error': 'Invalid statement ID',
+                    'debug_info': f'Statement {statement_id} not found in persistent storage'
+                }
+
+            # Restore statement from metadata (this also restores connection if needed)
+            restored_statement = _restore_statement_from_metadata(stmt_metadata)
+            if not restored_statement:
+                _remove_statement_metadata(statement_id)  # Remove stale metadata
+                return {
+                    'success': False,
+                    'error': 'Failed to restore statement - connection may have expired',
+                    'debug_info': 'Statement restoration failed'
+                }
+
+            # Store restored statement in memory
+            _statements[statement_id] = restored_statement
+
+            # Note: Statement needs to be re-executed after restoration
+            return {
+                'success': False,
+                'error': 'Statement restored but must be re-executed',
+                'debug_info': 'Statement restoration successful but execution state lost'
+            }
+
+        else:
+            debug_info = f"Statement {statement_id} found in memory"
         
         stmt_info = _statements[statement_id]
         cursor = stmt_info['cursor']
@@ -536,8 +782,10 @@ def fetch_all(connection_id: str, statement_id: str, format: str = 'array') -> D
 def execute_immediate(connection_id: str, sql: str, bind_values: List = None) -> Dict[str, Any]:
     """Execute SQL immediately without preparation"""
     try:
-        if connection_id not in _connections:
-            raise ValueError("Invalid connection ID")
+        # Ensure connection is available (restore if needed)
+        conn_result = _ensure_connection_available(connection_id)
+        if not conn_result['success']:
+            return conn_result
         
         conn_info = _connections[connection_id]
         conn = conn_info['connection']
@@ -570,8 +818,10 @@ def execute_immediate(connection_id: str, sql: str, bind_values: List = None) ->
 def begin_transaction(connection_id: str) -> Dict[str, Any]:
     """Begin database transaction"""
     try:
-        if connection_id not in _connections:
-            raise ValueError("Invalid connection ID")
+        # Ensure connection is available (restore if needed)
+        conn_result = _ensure_connection_available(connection_id)
+        if not conn_result['success']:
+            return conn_result
         
         conn_info = _connections[connection_id]
         conn = conn_info['connection']
@@ -591,8 +841,10 @@ def begin_transaction(connection_id: str) -> Dict[str, Any]:
 def commit(connection_id: str) -> Dict[str, Any]:
     """Commit current transaction"""
     try:
-        if connection_id not in _connections:
-            raise ValueError("Invalid connection ID")
+        # Ensure connection is available (restore if needed)
+        conn_result = _ensure_connection_available(connection_id)
+        if not conn_result['success']:
+            return conn_result
         
         conn = _connections[connection_id]['connection']
         conn.commit()
@@ -608,8 +860,10 @@ def commit(connection_id: str) -> Dict[str, Any]:
 def rollback(connection_id: str) -> Dict[str, Any]:
     """Rollback current transaction"""
     try:
-        if connection_id not in _connections:
-            raise ValueError("Invalid connection ID")
+        # Ensure connection is available (restore if needed)
+        conn_result = _ensure_connection_available(connection_id)
+        if not conn_result['success']:
+            return conn_result
         
         conn = _connections[connection_id]['connection']
         conn.rollback()
@@ -630,13 +884,17 @@ def disconnect(connection_id: str) -> Dict[str, Any]:
             conn.close()
             del _connections[connection_id]
         
-        # Clean up associated statements
+        # Clean up associated statements (both in memory and persistent storage)
         statements_to_remove = [
-            sid for sid, stmt in _statements.items() 
+            sid for sid, stmt in _statements.items()
             if stmt['connection_id'] == connection_id
         ]
         for sid in statements_to_remove:
             del _statements[sid]
+            _remove_statement_metadata(sid)  # Clean up persistent storage
+
+        # Clean up connection from persistent storage
+        _remove_connection_metadata(connection_id)
         
         return {'success': True}
         
