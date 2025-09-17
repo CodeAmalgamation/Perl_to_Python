@@ -6,6 +6,10 @@ helpers/database.py - Oracle database helper using oracledb driver
 import uuid
 import traceback
 import os
+import tempfile
+import json
+import pickle
+import time
 from typing import Dict, Any, List, Optional
 
 try:
@@ -16,6 +20,124 @@ except ImportError:
 # Global connection and statement pools
 _connections = {}
 _statements = {}
+
+# Persistent storage for connections across bridge calls
+_PERSISTENCE_DIR = os.path.join(tempfile.gettempdir(), 'cpan_bridge_db')
+_CONNECTION_TIMEOUT = 1800  # 30 minutes
+
+def _simple_encrypt(text: str) -> str:
+    """Simple XOR encryption for password storage (not production-grade)"""
+    if not text:
+        return ''
+    key = "CPAN_BRIDGE_DB_KEY_2024"
+    result = ""
+    for i, char in enumerate(text):
+        result += chr(ord(char) ^ ord(key[i % len(key)]))
+    return result.encode('latin1').hex()
+
+def _simple_decrypt(hex_text: str) -> str:
+    """Simple XOR decryption for password storage"""
+    if not hex_text:
+        return ''
+    try:
+        encrypted = bytes.fromhex(hex_text).decode('latin1')
+        key = "CPAN_BRIDGE_DB_KEY_2024"
+        result = ""
+        for i, char in enumerate(encrypted):
+            result += chr(ord(char) ^ ord(key[i % len(key)]))
+        return result
+    except:
+        return ''
+
+def _ensure_persistence_dir():
+    """Ensure persistence directory exists"""
+    if not os.path.exists(_PERSISTENCE_DIR):
+        os.makedirs(_PERSISTENCE_DIR, mode=0o700)
+
+def _save_connection_metadata(connection_id: str, metadata: Dict[str, Any], password: str = ''):
+    """Save connection metadata to persistent storage"""
+    try:
+        _ensure_persistence_dir()
+        metadata_file = os.path.join(_PERSISTENCE_DIR, f"{connection_id}.json")
+
+        # Store connection metadata including encrypted password
+        persistent_metadata = {
+            'connection_id': connection_id,
+            'type': metadata.get('type'),
+            'dsn': metadata.get('dsn'),
+            'username': metadata.get('username'),
+            'password': _simple_encrypt(password) if password else '',  # Simple encryption
+            'autocommit': metadata.get('autocommit'),
+            'raise_error': metadata.get('raise_error'),
+            'print_error': metadata.get('print_error'),
+            'created_at': time.time(),
+            'last_used': time.time()
+        }
+
+        with open(metadata_file, 'w') as f:
+            json.dump(persistent_metadata, f)
+
+        return True
+    except Exception:
+        return False
+
+def _load_connection_metadata(connection_id: str) -> Optional[Dict[str, Any]]:
+    """Load connection metadata from persistent storage"""
+    try:
+        metadata_file = os.path.join(_PERSISTENCE_DIR, f"{connection_id}.json")
+
+        if not os.path.exists(metadata_file):
+            return None
+
+        with open(metadata_file, 'r') as f:
+            metadata = json.load(f)
+
+        # Check if connection has expired
+        if time.time() - metadata.get('created_at', 0) > _CONNECTION_TIMEOUT:
+            os.unlink(metadata_file)  # Remove expired metadata
+            return None
+
+        # Update last used time
+        metadata['last_used'] = time.time()
+        with open(metadata_file, 'w') as f:
+            json.dump(metadata, f)
+
+        return metadata
+    except Exception:
+        return None
+
+def _remove_connection_metadata(connection_id: str):
+    """Remove connection metadata from persistent storage"""
+    try:
+        metadata_file = os.path.join(_PERSISTENCE_DIR, f"{connection_id}.json")
+        if os.path.exists(metadata_file):
+            os.unlink(metadata_file)
+    except Exception:
+        pass
+
+def _restore_connection_from_metadata(metadata: Dict[str, Any]) -> Optional[Any]:
+    """Restore Oracle connection from metadata"""
+    try:
+        # Recreate the Oracle connection using stored metadata
+        connection_params = _parse_oracle_dsn(metadata['dsn'])
+
+        # Decrypt stored password
+        password = _simple_decrypt(metadata.get('password', ''))
+
+        # Re-establish Oracle connection
+        options = {
+            'AutoCommit': metadata.get('autocommit', True),
+            'RaiseError': metadata.get('raise_error', False),
+            'PrintError': metadata.get('print_error', True)
+        }
+
+        conn = _connect_oracle(connection_params, metadata['username'], password, options)
+
+        return conn
+
+    except Exception as e:
+        # If connection restoration fails, the metadata is stale
+        return None
 
 def connect(dsn: str, username: str = '', password: str = '', options: Dict = None, db_type: str = '') -> Dict[str, Any]:
     """Connect to Oracle database using oracledb driver"""
@@ -40,7 +162,7 @@ def connect(dsn: str, username: str = '', password: str = '', options: Dict = No
             raise RuntimeError("Failed to establish Oracle database connection")
 
         # Store connection with metadata
-        _connections[connection_id] = {
+        connection_metadata = {
             'connection': conn,
             'type': 'oracle',
             'dsn': dsn,
@@ -49,9 +171,13 @@ def connect(dsn: str, username: str = '', password: str = '', options: Dict = No
             'raise_error': options.get('RaiseError', False) if options else False,
             'print_error': options.get('PrintError', True) if options else True,
         }
+        _connections[connection_id] = connection_metadata
 
         # Configure autocommit
-        conn.autocommit = _connections[connection_id]['autocommit']
+        conn.autocommit = connection_metadata['autocommit']
+
+        # Save connection metadata to persistent storage for cross-process access
+        _save_connection_metadata(connection_id, connection_metadata, password)
 
         return {
             'success': True,
@@ -158,11 +284,50 @@ def prepare(connection_id: str, sql: str) -> Dict[str, Any]:
 def execute_statement(connection_id: str, statement_id: str, bind_values: List = None, bind_params: Dict = None) -> Dict[str, Any]:
     """Execute prepared statement with enhanced bind parameter support"""
     try:
+        # Try to restore connection if not in memory
         if connection_id not in _connections:
-            raise ValueError("Invalid connection ID")
-        
+            debug_info = f"Connection {connection_id} not in memory, attempting to restore from persistent storage"
+
+            # Load connection metadata from persistent storage
+            metadata = _load_connection_metadata(connection_id)
+            if not metadata:
+                return {
+                    'success': False,
+                    'error': 'Invalid connection ID',
+                    'debug_info': f'Connection {connection_id} not found in persistent storage'
+                }
+
+            # Restore connection from metadata
+            conn = _restore_connection_from_metadata(metadata)
+            if not conn:
+                _remove_connection_metadata(connection_id)  # Remove stale metadata
+                return {
+                    'success': False,
+                    'error': 'Failed to restore connection - credentials may have changed',
+                    'debug_info': 'Connection restoration failed'
+                }
+
+            # Store restored connection in memory
+            _connections[connection_id] = {
+                'connection': conn,
+                'type': metadata['type'],
+                'dsn': metadata['dsn'],
+                'username': metadata['username'],
+                'autocommit': metadata['autocommit'],
+                'raise_error': metadata['raise_error'],
+                'print_error': metadata['print_error']
+            }
+
+            debug_info += " - Connection successfully restored"
+        else:
+            debug_info = f"Connection {connection_id} found in memory"
+
         if statement_id not in _statements:
-            raise ValueError("Invalid statement ID")
+            return {
+                'success': False,
+                'error': 'Invalid statement ID',
+                'debug_info': f'Statement {statement_id} not found'
+            }
         
         conn_info = _connections[connection_id]
         stmt_info = _statements[statement_id]
@@ -240,7 +405,8 @@ def execute_statement(connection_id: str, statement_id: str, bind_values: List =
         return {
             'success': True,
             'rows_affected': rows_affected,
-            'column_info': column_info
+            'column_info': column_info,
+            'debug_info': debug_info
         }
         
     except Exception as e:
