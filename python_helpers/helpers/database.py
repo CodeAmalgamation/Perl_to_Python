@@ -152,6 +152,7 @@ def _save_statement_metadata(statement_id: str, metadata: Dict[str, Any]):
             'sql': metadata.get('sql'),
             'executed': metadata.get('executed', False),
             'finished': metadata.get('finished', False),
+            'peeked_row': metadata.get('peeked_row'),  # Save peeked row data for cross-process fetch
             'created_at': time.time(),
             'last_used': time.time()
         }
@@ -231,7 +232,7 @@ def _restore_statement_from_metadata(statement_metadata: Dict[str, Any]) -> Opti
             'cursor': None,  # Will be created on demand
             'executed': False,  # Reset execution state (cursor is fresh)
             'finished': False,
-            'peeked_row': None  # Reset any cached data
+            'peeked_row': statement_metadata.get('peeked_row')  # Restore saved peeked row data
         }
 
         return restored_statement
@@ -629,7 +630,10 @@ def execute_statement(connection_id: str, statement_id: str, bind_values: List =
                 # Non-SELECT statement has column info
 
             # rows_affected from rowcount is typically reliable for non-SELECT statements
-        
+
+        # Save updated statement metadata including peeked_row to persistent storage
+        _save_statement_metadata(statement_id, stmt_info)
+
         return {
             'success': True,
             'rows_affected': rows_affected,
