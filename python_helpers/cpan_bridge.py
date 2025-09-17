@@ -53,10 +53,11 @@ def load_helper_modules() -> Dict[str, Any]:
     helper_modules = [
         'database',     # Database operations (Oracle, Informix, etc.)
         'xml',          # XML parsing and manipulation
+        'xpath',        # XPath processing with lxml (XML::XPath replacement)
         'http',         # HTTP requests and web operations
         'dates',        # Date parsing and manipulation
         'datetime_helper', # DateTime operations (renamed from datetime to avoid conflicts)
-        'crypto',       # Cryptography operations
+        'crypto',       # Cryptography operations (Crypt::CBC replacement)
         'email_helper', # Email sending (renamed from email to avoid conflicts)
         'logging_helper', # Logging operations
         'excel',        # Excel file operations
