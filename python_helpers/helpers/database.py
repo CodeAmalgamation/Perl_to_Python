@@ -676,12 +676,39 @@ def fetch_row(connection_id: str, statement_id: str, format: str = 'array') -> D
             # Store restored statement in memory
             _statements[statement_id] = restored_statement
 
-            # Note: Statement needs to be re-executed after restoration
-            return {
-                'success': False,
-                'error': 'Statement restored but must be re-executed',
-                'debug_info': 'Statement restoration successful but execution state lost'
-            }
+            # Automatically re-execute the restored statement for fetch operations
+            # This is safe since we have the original SQL and connection
+            debug_info += " - Re-executing restored statement for fetch"
+
+            try:
+                # Get the connection and create a fresh cursor
+                connection_id = restored_statement['connection_id']
+                if connection_id not in _connections:
+                    return {
+                        'success': False,
+                        'error': 'Connection lost during statement restoration',
+                        'debug_info': debug_info
+                    }
+
+                conn = _connections[connection_id]['connection']
+                cursor = conn.cursor()
+
+                # Execute the original SQL
+                cursor.execute(restored_statement['sql'])
+
+                # Update the statement info
+                restored_statement['cursor'] = cursor
+                restored_statement['executed'] = True
+                _statements[statement_id] = restored_statement
+
+                debug_info += " - Statement re-executed successfully"
+
+            except Exception as e:
+                return {
+                    'success': False,
+                    'error': f'Failed to re-execute restored statement: {str(e)}',
+                    'debug_info': debug_info
+                }
 
         else:
             debug_info = f"Statement {statement_id} found in memory"
@@ -765,16 +792,43 @@ def fetch_all(connection_id: str, statement_id: str, format: str = 'array') -> D
             # Store restored statement in memory
             _statements[statement_id] = restored_statement
 
-            # Note: Statement needs to be re-executed after restoration
-            return {
-                'success': False,
-                'error': 'Statement restored but must be re-executed',
-                'debug_info': 'Statement restoration successful but execution state lost'
-            }
+            # Automatically re-execute the restored statement for fetch operations
+            # This is safe since we have the original SQL and connection
+            debug_info += " - Re-executing restored statement for fetch_all"
+
+            try:
+                # Get the connection and create a fresh cursor
+                connection_id = restored_statement['connection_id']
+                if connection_id not in _connections:
+                    return {
+                        'success': False,
+                        'error': 'Connection lost during statement restoration',
+                        'debug_info': debug_info
+                    }
+
+                conn = _connections[connection_id]['connection']
+                cursor = conn.cursor()
+
+                # Execute the original SQL
+                cursor.execute(restored_statement['sql'])
+
+                # Update the statement info
+                restored_statement['cursor'] = cursor
+                restored_statement['executed'] = True
+                _statements[statement_id] = restored_statement
+
+                debug_info += " - Statement re-executed successfully for fetch_all"
+
+            except Exception as e:
+                return {
+                    'success': False,
+                    'error': f'Failed to re-execute restored statement: {str(e)}',
+                    'debug_info': debug_info
+                }
 
         else:
             debug_info = f"Statement {statement_id} found in memory"
-        
+
         stmt_info = _statements[statement_id]
         cursor = stmt_info['cursor']
         
