@@ -696,9 +696,17 @@ def fetch_row(connection_id: str, statement_id: str, format: str = 'array') -> D
                 # Execute the original SQL
                 cursor.execute(restored_statement['sql'])
 
+                # Preserve the peeked_row if it was restored from metadata
+                preserved_peeked_row = restored_statement.get('peeked_row')
+
                 # Update the statement info
                 restored_statement['cursor'] = cursor
                 restored_statement['executed'] = True
+
+                # Restore the peeked_row data if it was saved
+                if preserved_peeked_row is not None:
+                    restored_statement['peeked_row'] = preserved_peeked_row
+
                 _statements[statement_id] = restored_statement
 
                 debug_info += " - Statement re-executed successfully"
@@ -724,7 +732,7 @@ def fetch_row(connection_id: str, statement_id: str, format: str = 'array') -> D
         cursor = stmt_info['cursor']
 
         # Check if we have a peeked row from execute_statement
-        if 'peeked_row' in stmt_info:
+        if 'peeked_row' in stmt_info and stmt_info['peeked_row'] is not None:
             row = stmt_info['peeked_row']
             del stmt_info['peeked_row']  # Remove it so it's only returned once
         else:
