@@ -561,11 +561,7 @@ def execute_statement(connection_id: str, statement_id: str, bind_values: List =
         else:
             cursor.execute(stmt_info['sql'])
 
-        # Debug: Log execution details
-        import sys
-        print(f"DEBUG: Executed SQL: {stmt_info['sql']}", file=sys.stderr, flush=True)
-        print(f"DEBUG: Cursor description after execute: {cursor.description}", file=sys.stderr, flush=True)
-        print(f"DEBUG: Cursor rowcount after execute: {getattr(cursor, 'rowcount', 'unknown')}", file=sys.stderr, flush=True)
+        # Debug: Log execution details (removed direct stderr output that corrupts JSON)
 
         stmt_info['executed'] = True
 
@@ -579,7 +575,7 @@ def execute_statement(connection_id: str, statement_id: str, bind_values: List =
 
         if is_select:
             # For SELECT statements, Oracle needs special handling
-            print(f"DEBUG: Processing SELECT statement", file=sys.stderr, flush=True)
+            # Processing SELECT statement
 
             if hasattr(cursor, 'description') and cursor.description:
                 # Description is already available
@@ -588,10 +584,10 @@ def execute_statement(connection_id: str, statement_id: str, bind_values: List =
                     'names': [desc[0] for desc in cursor.description],
                     'types': [desc[1] if len(desc) > 1 else None for desc in cursor.description]
                 }
-                print(f"DEBUG: Column info available immediately: {column_info['count']} columns", file=sys.stderr, flush=True)
+                # Column info available immediately
             else:
                 # Try to peek at cursor to populate description (Oracle behavior)
-                print(f"DEBUG: Column info not available, attempting peek", file=sys.stderr, flush=True)
+                # Column info not available, attempting peek
                 try:
                     original_arraysize = getattr(cursor, 'arraysize', 1)
                     cursor.arraysize = 1
@@ -605,23 +601,23 @@ def execute_statement(connection_id: str, statement_id: str, bind_values: List =
                         }
                         # Store the peeked row for later retrieval
                         stmt_info['peeked_row'] = peek_row
-                        print(f"DEBUG: Peek successful: {column_info['count']} columns, row data available", file=sys.stderr, flush=True)
+                        # Peek successful
 
                         # For SELECT with data, set rows_affected = 1 (indicates data available)
                         rows_affected = 1
                     else:
-                        print(f"DEBUG: Peek returned no data", file=sys.stderr, flush=True)
+                        # Peek returned no data
                         rows_affected = 0
 
                     cursor.arraysize = original_arraysize
 
                 except Exception as peek_error:
-                    print(f"DEBUG: Peek failed: {peek_error}", file=sys.stderr, flush=True)
+                    # Peek failed
                     rows_affected = 0
 
         else:
             # For non-SELECT statements (INSERT, UPDATE, DELETE, etc.)
-            print(f"DEBUG: Processing non-SELECT statement", file=sys.stderr, flush=True)
+            # Processing non-SELECT statement
 
             # Try to get column info if available (some statements might return data)
             if hasattr(cursor, 'description') and cursor.description:
@@ -630,7 +626,7 @@ def execute_statement(connection_id: str, statement_id: str, bind_values: List =
                     'names': [desc[0] for desc in cursor.description],
                     'types': [desc[1] if len(desc) > 1 else None for desc in cursor.description]
                 }
-                print(f"DEBUG: Non-SELECT statement has column info: {column_info['count']} columns", file=sys.stderr, flush=True)
+                # Non-SELECT statement has column info
 
             # rows_affected from rowcount is typically reliable for non-SELECT statements
         
@@ -736,12 +732,11 @@ def fetch_row(connection_id: str, statement_id: str, format: str = 'array') -> D
                 if row is None and hasattr(cursor, 'description') and cursor.description:
                     # There's column info but no data - this is suspicious
                     import sys
-                    print(f"DEBUG: fetchone() returned None but cursor has description: {cursor.description}", file=sys.stderr, flush=True)
-                    print(f"DEBUG: cursor.rowcount: {getattr(cursor, 'rowcount', 'unknown')}", file=sys.stderr, flush=True)
+                    # fetchone() returned None but cursor has description
 
             except Exception as fetch_error:
                 import sys
-                print(f"DEBUG: fetchone() failed: {fetch_error}", file=sys.stderr, flush=True)
+                # fetchone() failed
                 row = None
 
         if row is None:
