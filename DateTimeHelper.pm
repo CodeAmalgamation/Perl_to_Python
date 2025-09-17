@@ -19,7 +19,7 @@ sub now {
     my $bridge = ref($class) ? $class : $class->new();
     
     # Call Python to get current timestamp
-    my $result = $bridge->call_python('datetime', 'now', {});
+    my $result = $bridge->call_python('datetime_helper', 'now', {});
     
     # Handle errors
     unless ($result && $result->{success}) {

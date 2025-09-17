@@ -55,6 +55,7 @@ def load_helper_modules() -> Dict[str, Any]:
         'xml',          # XML parsing and manipulation
         'http',         # HTTP requests and web operations
         'dates',        # Date parsing and manipulation
+        'datetime_helper', # DateTime operations (renamed from datetime to avoid conflicts)
         'crypto',       # Cryptography operations
         'email',        # Email sending
         'logging_helper', # Logging operations
