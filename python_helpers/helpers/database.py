@@ -502,12 +502,34 @@ def execute_statement(connection_id: str, statement_id: str, bind_values: List =
         else:
             debug_info = f"Connection {connection_id} found in memory"
 
+        # Try to restore statement if not in memory
         if statement_id not in _statements:
-            return {
-                'success': False,
-                'error': 'Invalid statement ID',
-                'debug_info': f'Statement {statement_id} not found'
-            }
+            debug_info += f" - Statement {statement_id} not in memory, attempting to restore from persistent storage"
+
+            # Load statement metadata from persistent storage
+            stmt_metadata = _load_statement_metadata(statement_id)
+            if not stmt_metadata:
+                return {
+                    'success': False,
+                    'error': 'Invalid statement ID',
+                    'debug_info': debug_info + f' - Statement {statement_id} not found in persistent storage'
+                }
+
+            # Restore statement from metadata (this also restores connection if needed)
+            restored_statement = _restore_statement_from_metadata(stmt_metadata)
+            if not restored_statement:
+                _remove_statement_metadata(statement_id)  # Remove stale metadata
+                return {
+                    'success': False,
+                    'error': 'Failed to restore statement - connection may have expired',
+                    'debug_info': debug_info + ' - Statement restoration failed'
+                }
+
+            # Store restored statement in memory
+            _statements[statement_id] = restored_statement
+            debug_info += " - Statement successfully restored"
+        else:
+            debug_info += f" - Statement {statement_id} found in memory"
         
         conn_info = _connections[connection_id]
         stmt_info = _statements[statement_id]
