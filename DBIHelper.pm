@@ -549,6 +549,40 @@ sub fetchrow_array {
     return @{$result->{row}};
 }
 
+# $sth->fetchrow_arrayref - returns array reference (critical DBI method)
+sub fetchrow_arrayref {
+    my $self = shift;
+
+    unless ($self->{executed}) {
+        $self->_set_error("Statement not executed");
+        return undef;
+    }
+
+    if ($self->{finished}) {
+        return undef;
+    }
+
+    my $result = $self->{parent}->call_python('database', 'fetch_row', {
+        connection_id => $self->{parent}->{connection_id},
+        statement_id => $self->{statement_id},
+        format => 'array'
+    });
+
+    if (!$result || !$result->{success}) {
+        my $error = $result ? $result->{error} : "Unknown fetch error";
+        $self->_set_error($error);
+        $self->{finished} = 1;
+        return undef;
+    }
+
+    if (!$result->{row}) {
+        $self->{finished} = 1;
+        return undef;
+    }
+
+    return $result->{row};  # Return array reference directly
+}
+
 # $sth->fetchrow_hashref - for hash-based access
 sub fetchrow_hashref {
     my $self = shift;
@@ -606,6 +640,46 @@ sub fetchall_arrayref {
     $self->{rows} = scalar @$rows;
     
     return $rows;
+}
+
+# $sth->fetch - alias for fetchrow_arrayref (common DBI usage)
+sub fetch {
+    my $self = shift;
+    return $self->fetchrow_arrayref();
+}
+
+# $sth->fetchall_hashref - returns all rows as hash references
+sub fetchall_hashref {
+    my ($self, $key_field) = @_;
+
+    unless ($self->{executed}) {
+        $self->_set_error("Statement not executed");
+        return {};
+    }
+
+    if ($self->{finished}) {
+        return {};
+    }
+
+    # Fetch all remaining rows as hash references
+    my @hash_rows = ();
+    while (my $row_hash = $self->fetchrow_hashref()) {
+        push @hash_rows, $row_hash;
+    }
+
+    # If key_field specified, return as hash keyed by that field
+    if ($key_field) {
+        my %keyed_rows = ();
+        for my $row (@hash_rows) {
+            if (exists $row->{$key_field}) {
+                $keyed_rows{$row->{$key_field}} = $row;
+            }
+        }
+        return \%keyed_rows;
+    }
+
+    # Otherwise return array reference of hash references
+    return \@hash_rows;
 }
 
 # $sth->dump_results - for bulk output in your scripts
@@ -734,7 +808,26 @@ functionality found in your Perl scripts including:
 
 =head1 METHODS
 
-All standard DBI methods are supported with identical interfaces.
+All standard DBI methods are supported with identical interfaces:
+
+=head2 Database Handle Methods
+
+- connect() - Establish database connection
+- prepare() - Prepare SQL statement
+- commit() - Commit transaction
+- rollback() - Rollback transaction
+- disconnect() - Close connection
+
+=head2 Statement Handle Methods
+
+- execute() - Execute prepared statement
+- fetchrow_array() - Fetch row as array
+- fetchrow_arrayref() - Fetch row as array reference
+- fetchrow_hashref() - Fetch row as hash reference
+- fetch() - Alias for fetchrow_arrayref
+- fetchall_arrayref() - Fetch all rows as array references
+- fetchall_hashref() - Fetch all rows as hash references
+- finish() - Finish statement handle
 
 =head1 MIGRATION
 
