@@ -1,74 +1,62 @@
 #!/usr/bin/env python3
 """
-helpers/database.py - Enhanced database helper with Oracle/Informix support
+helpers/database.py - Oracle database helper using oracledb driver
 """
 
-import sqlite3
 import uuid
 import traceback
 import os
-import re
 from typing import Dict, Any, List, Optional
+
+try:
+    import oracledb
+except ImportError:
+    raise ImportError("oracledb driver is required. Install with: pip install oracledb")
 
 # Global connection and statement pools
 _connections = {}
 _statements = {}
 
 def connect(dsn: str, username: str = '', password: str = '', options: Dict = None, db_type: str = '') -> Dict[str, Any]:
-    """Enhanced database connection with Oracle TNS support"""
+    """Connect to Oracle database using oracledb driver"""
     try:
         connection_id = str(uuid.uuid4())
-        
-        # Enhanced database type detection
-        if not db_type:
-            dsn_lower = dsn.lower()
-            if 'informix' in dsn_lower:
-                db_type = 'informix'
-            elif 'oracle' in dsn_lower or 'ora' in dsn_lower:
-                db_type = 'oracle'
-            else:
-                db_type, connection_string = parse_dsn(dsn)
-        else:
-            if db_type in ['oracle', 'informix']:
-                _, connection_string = parse_dsn(dsn)
-            else:
-                db_type, connection_string = parse_dsn(dsn)
-        
-        # Connect based on database type
-        conn = None
-        
-        if db_type == 'oracle':
-            conn = _connect_oracle(dsn, username, password, options)
-        elif db_type == 'informix':
-            conn = _connect_informix(dsn, username, password, options)
-        elif db_type == 'sqlite':
-            conn = sqlite3.connect(connection_string)
-            conn.row_factory = sqlite3.Row
-        else:
-            raise ValueError(f"Unsupported database type: {db_type}")
+
+        # Handle Oracle TNS-in-username pattern: "dbi:Oracle:" with "user@TNS_NAME"
+        actual_username = username
+        if '@' in username:
+            actual_username, tns_name = username.split('@', 1)
+            # If DSN is minimal, use TNS from username
+            if dsn in ['dbi:Oracle:', 'dbi:Oracle', 'dbi:Ora:', 'dbi:Ora']:
+                dsn = tns_name
+
+        # Parse Oracle connection details
+        connection_params = _parse_oracle_dsn(dsn)
+
+        # Connect to Oracle database
+        conn = _connect_oracle(connection_params, actual_username, password, options)
         
         if not conn:
-            raise RuntimeError("Failed to establish database connection")
-        
-        # Store connection with enhanced metadata
+            raise RuntimeError("Failed to establish Oracle database connection")
+
+        # Store connection with metadata
         _connections[connection_id] = {
             'connection': conn,
-            'type': db_type,
+            'type': 'oracle',
             'dsn': dsn,
-            'username': username,
+            'username': actual_username,
             'autocommit': options.get('AutoCommit', True) if options else True,
             'raise_error': options.get('RaiseError', False) if options else False,
             'print_error': options.get('PrintError', True) if options else True,
         }
-        
+
         # Configure autocommit
-        if hasattr(conn, 'autocommit'):
-            conn.autocommit = _connections[connection_id]['autocommit']
-        
+        conn.autocommit = _connections[connection_id]['autocommit']
+
         return {
             'success': True,
             'connection_id': connection_id,
-            'db_type': db_type
+            'db_type': 'oracle'
         }
         
     except Exception as e:
@@ -78,97 +66,51 @@ def connect(dsn: str, username: str = '', password: str = '', options: Dict = No
             'traceback': traceback.format_exc()
         }
 
-def _connect_oracle(dsn: str, username: str, password: str, options: Dict = None) -> Any:
-    """Enhanced Oracle connection with multiple driver support"""
-    
-    # Parse Oracle connection details
-    connection_params = _parse_oracle_dsn(dsn)
-    
-    # Try oracledb first (modern driver)
-    try:
-        import oracledb
-        
-        # Build connection string
-        if 'service_name' in connection_params:
-            connect_string = f"{connection_params.get('host', 'localhost')}:{connection_params.get('port', 1521)}/{connection_params['service_name']}"
-        elif 'sid' in connection_params:
-            connect_string = f"{connection_params.get('host', 'localhost')}:{connection_params.get('port', 1521)}/{connection_params['sid']}"
-        elif 'tns' in connection_params:
-            connect_string = connection_params['tns']
-        else:
-            # Fallback for minimal connection info
-            connect_string = f"localhost:1521/XE"
-        
-        conn = oracledb.connect(
-            user=username,
-            password=password,
-            dsn=connect_string
-        )
-        
-        return conn
-        
-    except ImportError:
-        pass
-    
-    # Try cx_Oracle as fallback
-    try:
-        import cx_Oracle
-        
-        if 'service_name' in connection_params:
-            dsn_string = cx_Oracle.makedsn(
-                connection_params.get('host', 'localhost'),
-                connection_params.get('port', 1521),
-                service_name=connection_params['service_name']
-            )
-        elif 'sid' in connection_params:
-            dsn_string = cx_Oracle.makedsn(
-                connection_params.get('host', 'localhost'),
-                connection_params.get('port', 1521),
-                sid=connection_params['sid']
-            )
-        else:
-            dsn_string = connection_params.get('tns', f"localhost:1521/XE")
-        
-        conn = cx_Oracle.connect(username, password, dsn_string)
-        return conn
-        
-    except ImportError:
-        pass
-    
-    # Final fallback
-    raise ImportError("No Oracle driver available (oracledb or cx_Oracle required)")
+def _connect_oracle(connection_params: Dict[str, str], username: str, password: str, options: Dict = None) -> Any:
+    """Connect to Oracle database using oracledb driver"""
 
-def _connect_informix(dsn: str, username: str, password: str, options: Dict = None) -> Any:
-    """Connect to Informix database"""
-    
-    # Try informixdb if available
-    try:
-        import informixdb
-        return informixdb.connect(dsn)
-    except ImportError:
-        pass
-    
-    # Fallback to subprocess approach
-    raise ImportError("No Informix driver available (informixdb required)")
+    # Build connection string
+    if 'service_name' in connection_params:
+        connect_string = f"{connection_params.get('host', 'localhost')}:{connection_params.get('port', 1521)}/{connection_params['service_name']}"
+    elif 'sid' in connection_params:
+        connect_string = f"{connection_params.get('host', 'localhost')}:{connection_params.get('port', 1521)}/{connection_params['sid']}"
+    elif 'tns' in connection_params:
+        connect_string = connection_params['tns']
+    else:
+        # Fallback for minimal connection info
+        connect_string = f"localhost:1521/XE"
+
+    conn = oracledb.connect(
+        user=username,
+        password=password,
+        dsn=connect_string
+    )
+
+    return conn
+
 
 def _parse_oracle_dsn(dsn: str) -> Dict[str, str]:
-    """Enhanced Oracle DSN parsing"""
+    """Parse Oracle DSN format"""
     params = {}
-    
+
     if dsn.startswith('dbi:'):
-        # Standard DBI DSN format
+        # Standard DBI DSN format: dbi:Oracle:...
         parts = dsn.split(':', 2)
         if len(parts) >= 3:
             db_info = parts[2]
-            
+
+            # Check if driver is Oracle
+            if parts[1].lower() not in ['oracle', 'ora']:
+                raise ValueError(f"Only Oracle databases are supported, got: {parts[1]}")
+
             if ';' in db_info:
-                # Key=value format
+                # Key=value format: host=localhost;port=1521;service_name=ORCL
                 for param in db_info.split(';'):
                     if '=' in param:
                         key, value = param.split('=', 1)
                         params[key.lower()] = value
             elif ':' in db_info and not db_info.startswith('('):
-                # host:port:sid format
+                # host:port:sid format: localhost:1521:XE
                 parts = db_info.split(':')
                 if len(parts) >= 3:
                     params['host'] = parts[0]
@@ -178,38 +120,11 @@ def _parse_oracle_dsn(dsn: str) -> Dict[str, str]:
                 # TNS name or connection descriptor
                 params['tns'] = db_info
     else:
-        # Direct connection string
+        # Direct connection string (TNS name or host:port/service)
         params['tns'] = dsn
-    
+
     return params
 
-def parse_dsn(dsn: str) -> tuple:
-    """Parse DBI DSN format"""
-    if not dsn.startswith('dbi:'):
-        return 'unknown', dsn
-    
-    parts = dsn.split(':', 2)
-    if len(parts) != 3:
-        raise ValueError(f"Invalid DSN format: {dsn}")
-    
-    driver = parts[1].lower()
-    database_info = parts[2]
-    
-    if driver in ['sqlite', 'sqlite3']:
-        if database_info.startswith('dbname='):
-            db_path = database_info[7:]
-        else:
-            db_path = database_info
-        return 'sqlite', db_path
-    
-    elif driver in ['oracle', 'ora']:
-        return 'oracle', database_info
-    
-    elif driver == 'informix':
-        return 'informix', database_info
-    
-    else:
-        raise ValueError(f"Unsupported database driver: {driver}")
 
 def prepare(connection_id: str, sql: str) -> Dict[str, Any]:
     """Prepare SQL statement"""
@@ -259,8 +174,8 @@ def execute_statement(connection_id: str, statement_id: str, bind_values: List =
         # Handle different bind parameter formats
         final_bind_values = bind_values or []
         
-        # Process named bind parameters for Oracle stored procedures
-        if bind_params and conn_info['type'] == 'oracle':
+        # Process named bind parameters for Oracle
+        if bind_params:
             # Convert named parameters to positional for Oracle
             sql = stmt_info['sql']
             for param_name, param_info in bind_params.items():
@@ -278,10 +193,17 @@ def execute_statement(connection_id: str, statement_id: str, bind_values: List =
             cursor.execute(stmt_info['sql'], final_bind_values)
         else:
             cursor.execute(stmt_info['sql'])
-        
+
+        # Debug: Log execution details
+        import sys
+        print(f"DEBUG: Executed SQL: {stmt_info['sql']}", file=sys.stderr, flush=True)
+        print(f"DEBUG: Cursor description after execute: {cursor.description}", file=sys.stderr, flush=True)
+        print(f"DEBUG: Cursor rowcount after execute: {getattr(cursor, 'rowcount', 'unknown')}", file=sys.stderr, flush=True)
+
         stmt_info['executed'] = True
-        
+
         # Get enhanced column information
+        # For Oracle, description may only be available after a peek at the result
         column_info = None
         if hasattr(cursor, 'description') and cursor.description:
             column_info = {
@@ -289,7 +211,30 @@ def execute_statement(connection_id: str, statement_id: str, bind_values: List =
                 'names': [desc[0] for desc in cursor.description],
                 'types': [desc[1] if len(desc) > 1 else None for desc in cursor.description]
             }
-        
+        else:
+            # Try to peek at cursor to populate description (Oracle behavior)
+            try:
+                # Save current position, peek, then restore
+                original_arraysize = getattr(cursor, 'arraysize', 1)
+                cursor.arraysize = 1
+                peek_row = cursor.fetchone()
+
+                if peek_row is not None and hasattr(cursor, 'description') and cursor.description:
+                    column_info = {
+                        'count': len(cursor.description),
+                        'names': [desc[0] for desc in cursor.description],
+                        'types': [desc[1] if len(desc) > 1 else None for desc in cursor.description]
+                    }
+                    # Store the peeked row for later retrieval
+                    stmt_info['peeked_row'] = peek_row
+
+                cursor.arraysize = original_arraysize
+
+            except Exception as peek_error:
+                # If peek fails, continue without column info
+                import sys
+                print(f"DEBUG: Peek failed: {peek_error}", file=sys.stderr, flush=True)
+
         rows_affected = getattr(cursor, 'rowcount', 0)
         
         return {
@@ -319,8 +264,28 @@ def fetch_row(connection_id: str, statement_id: str, format: str = 'array') -> D
             return {'success': False}
         
         cursor = stmt_info['cursor']
-        row = cursor.fetchone()
-        
+
+        # Check if we have a peeked row from execute_statement
+        if 'peeked_row' in stmt_info:
+            row = stmt_info['peeked_row']
+            del stmt_info['peeked_row']  # Remove it so it's only returned once
+        else:
+            # Debug: Check cursor state
+            try:
+                row = cursor.fetchone()
+
+                # Debug logging (only if row is None when it shouldn't be)
+                if row is None and hasattr(cursor, 'description') and cursor.description:
+                    # There's column info but no data - this is suspicious
+                    import sys
+                    print(f"DEBUG: fetchone() returned None but cursor has description: {cursor.description}", file=sys.stderr, flush=True)
+                    print(f"DEBUG: cursor.rowcount: {getattr(cursor, 'rowcount', 'unknown')}", file=sys.stderr, flush=True)
+
+            except Exception as fetch_error:
+                import sys
+                print(f"DEBUG: fetchone() failed: {fetch_error}", file=sys.stderr, flush=True)
+                row = None
+
         if row is None:
             stmt_info['finished'] = True
             return {'success': False}
@@ -415,9 +380,7 @@ def begin_transaction(connection_id: str) -> Dict[str, Any]:
         conn_info = _connections[connection_id]
         conn = conn_info['connection']
         
-        # Most databases handle this automatically
-        if conn_info['type'] == 'sqlite':
-            conn.execute('BEGIN')
+        # Oracle handles transactions automatically
         
         conn_info['autocommit'] = False
         

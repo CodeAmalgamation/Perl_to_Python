@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Email helper module for CPAN bridge
+email_helper.py - Email helper module for CPAN bridge
 Provides Mail::Sender functionality using Python's email libraries
+Renamed from email.py to avoid conflict with Python's email module
 """
 
 import smtplib

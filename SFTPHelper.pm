@@ -86,8 +86,13 @@ sub _connect {
         $params->{ssh_options} = $self->{ssh_options};
     }
     
-    # Connect via Python backend
-    my $result = $self->call_python('sftp', 'connect', $params);
+    # Add 'more' parameter for SSH options (matches sftp.py new() function)
+    if ($self->{more} && @{$self->{more}}) {
+        $params->{more} = $self->{more};
+    }
+
+    # Connect via Python backend using 'new' function
+    my $result = $self->call_python('sftp', 'new', $params);
     
     if ($result->{success}) {
         $self->{connected} = 1;
@@ -174,9 +179,9 @@ sub ls {
             $pattern_str =~ s/^\(\?\^?:?//;  # Remove (?^: prefix
             $pattern_str =~ s/\)$//;         # Remove trailing )
             $pattern_str =~ s/^\(\?\-xism://; # Remove (?-xism: prefix
-            $params->{wanted_pattern} = $pattern_str;
+            $params->{wanted} = $pattern_str;
         } else {
-            $params->{wanted_pattern} = $wanted_pattern;
+            $params->{wanted} = $wanted_pattern;
         }
     }
     

@@ -53,10 +53,12 @@ def load_helper_modules() -> Dict[str, Any]:
     helper_modules = [
         'database',     # Database operations (Oracle, Informix, etc.)
         'xml',          # XML parsing and manipulation
+        'xpath',        # XPath processing with lxml (XML::XPath replacement)
         'http',         # HTTP requests and web operations
         'dates',        # Date parsing and manipulation
-        'crypto',       # Cryptography operations
-        'email',        # Email sending
+        'datetime_helper', # DateTime operations (renamed from datetime to avoid conflicts)
+        'crypto',       # Cryptography operations (Crypt::CBC replacement)
+        'email_helper', # Email sending (renamed from email to avoid conflicts)
         'logging_helper', # Logging operations
         'excel',        # Excel file operations
         'sftp',         # SFTP operations
@@ -92,12 +94,19 @@ def validate_request(request: Dict[str, Any]) -> bool:
             raise ValueError(f"Missing required field: {field}")
     
     # Basic security check - prevent dangerous function names
-    dangerous_patterns = ['__', 'eval', 'exec', 'import', 'open', 'file', 'system', 'subprocess']
+    dangerous_patterns = ['__', 'eval', 'import', 'subprocess']
+    dangerous_exact = ['exec', 'open', 'file', 'system']  # Exact matches only
     function_name = request['function'].lower()
     module_name = request['module'].lower()
-    
+
+    # Check substring patterns
     for pattern in dangerous_patterns:
         if pattern in function_name or pattern in module_name:
+            raise ValueError(f"Potentially dangerous function/module name: {request['module']}.{request['function']}")
+
+    # Check exact matches
+    for pattern in dangerous_exact:
+        if function_name == pattern or module_name == pattern:
             raise ValueError(f"Potentially dangerous function/module name: {request['module']}.{request['function']}")
     
     # Validate module name format
@@ -116,7 +125,7 @@ def call_helper_function(modules: Dict[str, Any], request: Dict[str, Any]) -> Di
     function_name = request['function']
     params = request.get('params', {})
     
-    debug_log(f"Calling {module_name}.{function_name} with params: {params}", level=2)
+    debug_log(f"Calling {module_name}.{function_name} with params: {params}", level=1)
     
     # Check if module is available
     if module_name not in modules:
@@ -157,7 +166,7 @@ def call_helper_function(modules: Dict[str, Any], request: Dict[str, Any]) -> Di
         # Re-raise with more context
         raise RuntimeError(f"Error in {module_name}.{function_name}: {str(e)}") from e
     
-    debug_log(f"Function {module_name}.{function_name} completed successfully", level=2)
+    debug_log(f"Function {module_name}.{function_name} completed successfully, returning: {result}", level=1)
     
     return {
         'success': True,

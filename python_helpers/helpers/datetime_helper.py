@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-helpers/datetime.py - Minimal DateTime processing for DateTimeHelper.pm
+helpers/datetime_helper.py - Minimal DateTime processing for DateTimeHelper.pm
 
 Focused solely on DateTime->now->epoch pattern found in codebase analysis.
 Uses Python's built-in time module for timestamp generation.
+Renamed from datetime.py to avoid conflict with Python's datetime module.
 """
 
 import time
@@ -69,8 +70,8 @@ def _test_basic_functionality():
         timestamps.append(timestamp)
         print(f"Test {i+1}: timestamp = {timestamp}")
         
-        # Small delay to ensure timestamps are different
-        time.sleep(0.1)
+        # Small delay to ensure timestamps are different (need 1+ seconds for int timestamps)
+        time.sleep(1.1)
     
     # Validate timestamps are reasonable (within last 24 hours and increasing)
     current_time = int(time.time())
