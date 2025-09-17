@@ -155,11 +155,22 @@ sub prepare {
         $self->_set_error($error);
         return undef;
     }
-    
+
+    # Extract statement_id from nested result structure (CPANBridge wraps results)
+    my $statement_id;
+    if ($result->{result} && $result->{result}->{statement_id}) {
+        $statement_id = $result->{result}->{statement_id};
+    } elsif ($result->{statement_id}) {
+        $statement_id = $result->{statement_id};
+    } else {
+        $self->_set_error("Statement ID not found in result structure");
+        return undef;
+    }
+
     # Create statement handle
     my $sth = DBIHelper::StatementHandle->new(
         parent => $self,
-        statement_id => $result->{statement_id},
+        statement_id => $statement_id,
         sql => $sql
     );
     
@@ -193,8 +204,18 @@ sub do {
         }
         return undef;
     }
-    
-    return $result->{rows_affected};
+
+    # Extract rows_affected from nested result structure (CPANBridge wraps results)
+    my $rows_affected;
+    if ($result->{result} && defined $result->{result}->{rows_affected}) {
+        $rows_affected = $result->{result}->{rows_affected};
+    } elsif (defined $result->{rows_affected}) {
+        $rows_affected = $result->{rows_affected};
+    } else {
+        $rows_affected = 0;  # Default to 0 if not found
+    }
+
+    return $rows_affected;
 }
 
 # Transaction control
@@ -540,13 +561,19 @@ sub fetchrow_array {
         $self->{finished} = 1;
         return ();
     }
-    
-    if (!$result->{row}) {
+
+    # Extract row data from nested result structure (CPANBridge wraps results)
+    my $row_data;
+    if ($result->{result} && $result->{result}->{row}) {
+        $row_data = $result->{result}->{row};
+    } elsif ($result->{row}) {
+        $row_data = $result->{row};
+    } else {
         $self->{finished} = 1;
         return ();
     }
-    
-    return @{$result->{row}};
+
+    return @{$row_data};
 }
 
 # $sth->fetchrow_arrayref - returns array reference (critical DBI method)
@@ -575,12 +602,18 @@ sub fetchrow_arrayref {
         return undef;
     }
 
-    if (!$result->{row}) {
+    # Extract row data from nested result structure (CPANBridge wraps results)
+    my $row_data;
+    if ($result->{result} && $result->{result}->{row}) {
+        $row_data = $result->{result}->{row};
+    } elsif ($result->{row}) {
+        $row_data = $result->{row};
+    } else {
         $self->{finished} = 1;
         return undef;
     }
 
-    return $result->{row};  # Return array reference directly
+    return $row_data;  # Return array reference directly
 }
 
 # $sth->fetchrow_hashref - for hash-based access
@@ -602,12 +635,23 @@ sub fetchrow_hashref {
         format => 'hash'
     });
     
-    if (!$result || !$result->{success} || !$result->{row}) {
+    if (!$result || !$result->{success}) {
         $self->{finished} = 1;
         return undef;
     }
-    
-    return $result->{row};
+
+    # Extract row data from nested result structure (CPANBridge wraps results)
+    my $row_data;
+    if ($result->{result} && $result->{result}->{row}) {
+        $row_data = $result->{result}->{row};
+    } elsif ($result->{row}) {
+        $row_data = $result->{row};
+    } else {
+        $self->{finished} = 1;
+        return undef;
+    }
+
+    return $row_data;
 }
 
 # $sth->fetchall_arrayref - for bulk retrieval
@@ -636,7 +680,17 @@ sub fetchall_arrayref {
     }
     
     $self->{finished} = 1;
-    my $rows = $result->{rows} || [];
+
+    # Extract rows from nested result structure (CPANBridge wraps results)
+    my $rows;
+    if ($result->{result} && $result->{result}->{rows}) {
+        $rows = $result->{result}->{rows};
+    } elsif ($result->{rows}) {
+        $rows = $result->{rows};
+    } else {
+        $rows = [];
+    }
+
     $self->{rows} = scalar @$rows;
     
     return $rows;
