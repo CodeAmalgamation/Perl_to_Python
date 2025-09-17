@@ -766,3 +766,306 @@ def _parse_ls_line(line: str) -> Optional[Dict[str, Any]]:
         'permissions': permissions,
         'is_dir': permissions.startswith('d'),
     }
+
+def get(session_id: str, remote_file: str, local_file: str) -> Dict[str, Any]:
+    """
+    Download file from remote server (matches $sftp->get())
+
+    Args:
+        session_id: Active SFTP session ID
+        remote_file: Remote file path
+        local_file: Local file path
+
+    Returns:
+        Dictionary with operation result
+    """
+    try:
+        if session_id not in SFTP_SESSIONS:
+            return {
+                'success': False,
+                'error': 'SFTP session not found or expired'
+            }
+
+        session = SFTP_SESSIONS[session_id]
+
+        if session['connection_type'] == 'paramiko':
+            return _get_paramiko(session, remote_file, local_file)
+        else:
+            return _get_subprocess(session, remote_file, local_file)
+
+    except Exception as e:
+        error_msg = f'SFTP get operation failed: {str(e)}'
+        if session_id in SFTP_SESSIONS:
+            SFTP_SESSIONS[session_id]['last_error'] = error_msg
+        return {
+            'success': False,
+            'error': error_msg
+        }
+
+def _get_paramiko(session: Dict[str, Any], remote_file: str, local_file: str) -> Dict[str, Any]:
+    """Download file using paramiko"""
+    sftp = session['sftp']
+
+    # Handle relative paths
+    if not remote_file.startswith('/'):
+        remote_file = f"{session['current_dir'].rstrip('/')}/{remote_file}"
+
+    try:
+        sftp.get(remote_file, local_file)
+        return {
+            'success': True,
+            'result': {
+                'remote_file': remote_file,
+                'local_file': local_file,
+                'transferred_at': time.time()
+            }
+        }
+    except Exception as e:
+        error_msg = f'Failed to download {remote_file}: {str(e)}'
+        session['last_error'] = error_msg
+        return {
+            'success': False,
+            'error': error_msg
+        }
+
+def _get_subprocess(session: Dict[str, Any], remote_file: str, local_file: str) -> Dict[str, Any]:
+    """Download file using subprocess (scp)"""
+    try:
+        # Build scp command
+        cmd = ['scp']
+
+        # Add SSH options
+        ssh_options = session.get('ssh_options', {})
+        if 'identity_file' in ssh_options:
+            cmd.extend(['-i', ssh_options['identity_file']])
+
+        # Remote source
+        remote_source = f"{session['user']}@{session['host']}:{remote_file}"
+        cmd.extend([remote_source, local_file])
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+        if result.returncode == 0:
+            return {
+                'success': True,
+                'result': {
+                    'remote_file': remote_file,
+                    'local_file': local_file,
+                    'transferred_at': time.time()
+                }
+            }
+        else:
+            error_msg = f'scp failed: {result.stderr.strip()}'
+            session['last_error'] = error_msg
+            return {
+                'success': False,
+                'error': error_msg
+            }
+
+    except Exception as e:
+        error_msg = f'Failed to download {remote_file}: {str(e)}'
+        session['last_error'] = error_msg
+        return {
+            'success': False,
+            'error': error_msg
+        }
+
+def mkdir(session_id: str, remote_dir: str) -> Dict[str, Any]:
+    """
+    Create directory on remote server (matches $sftp->mkdir())
+
+    Args:
+        session_id: Active SFTP session ID
+        remote_dir: Remote directory path
+
+    Returns:
+        Dictionary with operation result
+    """
+    try:
+        if session_id not in SFTP_SESSIONS:
+            return {
+                'success': False,
+                'error': 'SFTP session not found or expired'
+            }
+
+        session = SFTP_SESSIONS[session_id]
+
+        if session['connection_type'] == 'paramiko':
+            return _mkdir_paramiko(session, remote_dir)
+        else:
+            return _mkdir_subprocess(session, remote_dir)
+
+    except Exception as e:
+        error_msg = f'SFTP mkdir operation failed: {str(e)}'
+        if session_id in SFTP_SESSIONS:
+            SFTP_SESSIONS[session_id]['last_error'] = error_msg
+        return {
+            'success': False,
+            'error': error_msg
+        }
+
+def _mkdir_paramiko(session: Dict[str, Any], remote_dir: str) -> Dict[str, Any]:
+    """Create directory using paramiko"""
+    sftp = session['sftp']
+
+    # Handle relative paths
+    if not remote_dir.startswith('/'):
+        remote_dir = f"{session['current_dir'].rstrip('/')}/{remote_dir}"
+
+    try:
+        sftp.mkdir(remote_dir)
+        return {
+            'success': True,
+            'result': {
+                'remote_dir': remote_dir,
+                'created_at': time.time()
+            }
+        }
+    except Exception as e:
+        error_msg = f'Failed to create directory {remote_dir}: {str(e)}'
+        session['last_error'] = error_msg
+        return {
+            'success': False,
+            'error': error_msg
+        }
+
+def _mkdir_subprocess(session: Dict[str, Any], remote_dir: str) -> Dict[str, Any]:
+    """Create directory using subprocess (ssh + mkdir)"""
+    try:
+        # Build ssh command
+        cmd = ['ssh']
+
+        # Add SSH options
+        ssh_options = session.get('ssh_options', {})
+        if 'identity_file' in ssh_options:
+            cmd.extend(['-i', ssh_options['identity_file']])
+
+        # Remote target and command
+        remote_target = f"{session['user']}@{session['host']}"
+        cmd.extend([remote_target, f'mkdir -p "{remote_dir}"'])
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+        if result.returncode == 0:
+            return {
+                'success': True,
+                'result': {
+                    'remote_dir': remote_dir,
+                    'created_at': time.time()
+                }
+            }
+        else:
+            error_msg = f'mkdir failed: {result.stderr.strip()}'
+            session['last_error'] = error_msg
+            return {
+                'success': False,
+                'error': error_msg
+            }
+
+    except Exception as e:
+        error_msg = f'Failed to create directory {remote_dir}: {str(e)}'
+        session['last_error'] = error_msg
+        return {
+            'success': False,
+            'error': error_msg
+        }
+
+def remove(session_id: str, remote_file: str) -> Dict[str, Any]:
+    """
+    Remove file from remote server (matches $sftp->remove())
+
+    Args:
+        session_id: Active SFTP session ID
+        remote_file: Remote file path
+
+    Returns:
+        Dictionary with operation result
+    """
+    try:
+        if session_id not in SFTP_SESSIONS:
+            return {
+                'success': False,
+                'error': 'SFTP session not found or expired'
+            }
+
+        session = SFTP_SESSIONS[session_id]
+
+        if session['connection_type'] == 'paramiko':
+            return _remove_paramiko(session, remote_file)
+        else:
+            return _remove_subprocess(session, remote_file)
+
+    except Exception as e:
+        error_msg = f'SFTP remove operation failed: {str(e)}'
+        if session_id in SFTP_SESSIONS:
+            SFTP_SESSIONS[session_id]['last_error'] = error_msg
+        return {
+            'success': False,
+            'error': error_msg
+        }
+
+def _remove_paramiko(session: Dict[str, Any], remote_file: str) -> Dict[str, Any]:
+    """Remove file using paramiko"""
+    sftp = session['sftp']
+
+    # Handle relative paths
+    if not remote_file.startswith('/'):
+        remote_file = f"{session['current_dir'].rstrip('/')}/{remote_file}"
+
+    try:
+        sftp.remove(remote_file)
+        return {
+            'success': True,
+            'result': {
+                'remote_file': remote_file,
+                'removed_at': time.time()
+            }
+        }
+    except Exception as e:
+        error_msg = f'Failed to remove {remote_file}: {str(e)}'
+        session['last_error'] = error_msg
+        return {
+            'success': False,
+            'error': error_msg
+        }
+
+def _remove_subprocess(session: Dict[str, Any], remote_file: str) -> Dict[str, Any]:
+    """Remove file using subprocess (ssh + rm)"""
+    try:
+        # Build ssh command
+        cmd = ['ssh']
+
+        # Add SSH options
+        ssh_options = session.get('ssh_options', {})
+        if 'identity_file' in ssh_options:
+            cmd.extend(['-i', ssh_options['identity_file']])
+
+        # Remote target and command
+        remote_target = f"{session['user']}@{session['host']}"
+        cmd.extend([remote_target, f'rm "{remote_file}"'])
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+
+        if result.returncode == 0:
+            return {
+                'success': True,
+                'result': {
+                    'remote_file': remote_file,
+                    'removed_at': time.time()
+                }
+            }
+        else:
+            error_msg = f'rm failed: {result.stderr.strip()}'
+            session['last_error'] = error_msg
+            return {
+                'success': False,
+                'error': error_msg
+            }
+
+    except Exception as e:
+        error_msg = f'Failed to remove {remote_file}: {str(e)}'
+        session['last_error'] = error_msg
+        return {
+            'success': False,
+            'error': error_msg
+        }
