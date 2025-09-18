@@ -115,7 +115,18 @@ sub connect {
     }
     
     # Success - configure handle
-    $self->{connection_id} = $result->{connection_id};
+    # Extract connection_id from nested result structure (CPANBridge wraps results)
+    my $connection_id;
+    if ($result->{result} && $result->{result}->{connection_id}) {
+        $connection_id = $result->{result}->{connection_id};
+    } elsif ($result->{connection_id}) {
+        $connection_id = $result->{connection_id};
+    } else {
+        $self->_set_error("Connection ID not found in result structure");
+        return 1;  # Return 1 for FAILURE
+    }
+
+    $self->{connection_id} = $connection_id;
     $self->{connected} = 1;
     $self->{Active} = 1;
     
@@ -144,11 +155,22 @@ sub prepare {
         $self->_set_error($error);
         return undef;
     }
-    
+
+    # Extract statement_id from nested result structure (CPANBridge wraps results)
+    my $statement_id;
+    if ($result->{result} && $result->{result}->{statement_id}) {
+        $statement_id = $result->{result}->{statement_id};
+    } elsif ($result->{statement_id}) {
+        $statement_id = $result->{statement_id};
+    } else {
+        $self->_set_error("Statement ID not found in result structure");
+        return undef;
+    }
+
     # Create statement handle
     my $sth = DBIHelper::StatementHandle->new(
         parent => $self,
-        statement_id => $result->{statement_id},
+        statement_id => $statement_id,
         sql => $sql
     );
     
@@ -182,8 +204,18 @@ sub do {
         }
         return undef;
     }
-    
-    return $result->{rows_affected};
+
+    # Extract rows_affected from nested result structure (CPANBridge wraps results)
+    my $rows_affected;
+    if ($result->{result} && defined $result->{result}->{rows_affected}) {
+        $rows_affected = $result->{result}->{rows_affected};
+    } elsif (defined $result->{rows_affected}) {
+        $rows_affected = $result->{rows_affected};
+    } else {
+        $rows_affected = 0;  # Default to 0 if not found
+    }
+
+    return $rows_affected;
 }
 
 # Transaction control
@@ -459,19 +491,39 @@ sub execute {
     
     $self->{executed} = 1;
     
-    # Set column metadata from result
-    if ($result->{column_info}) {
-        $self->{NUM_OF_FIELDS} = $result->{column_info}->{count} || 0;
-        $self->{NAME} = $result->{column_info}->{names} || [];
-        $self->{TYPE} = $result->{column_info}->{types} || [];
-        $self->{NAME_uc} = [map { uc($_) } @{$self->{NAME}}];
+    # Set column metadata from result (handle nested structure)
+    my $column_info;
+    if ($result->{result} && $result->{result}->{column_info}) {
+        $column_info = $result->{result}->{column_info};
+    } elsif ($result->{column_info}) {
+        $column_info = $result->{column_info};
     }
-    
-    # Set row count
-    $self->{rows} = $result->{rows_affected} || 0;
-    
+
+    if ($column_info) {
+        $self->{NUM_OF_FIELDS} = $column_info->{count} || 0;
+        $self->{NAME} = $column_info->{names} || [];
+        $self->{TYPE} = $column_info->{types} || [];
+        $self->{NAME_uc} = [map { uc($_) } @{$self->{NAME}}];
+    } else {
+        # No column info available (common for non-SELECT statements)
+        $self->{NUM_OF_FIELDS} = 0;
+        $self->{NAME} = [];
+        $self->{TYPE} = [];
+        $self->{NAME_uc} = [];
+    }
+
+    # Set row count (handle nested structure)
+    my $rows_affected;
+    if ($result->{result} && defined $result->{result}->{rows_affected}) {
+        $rows_affected = $result->{result}->{rows_affected};
+    } elsif (defined $result->{rows_affected}) {
+        $rows_affected = $result->{rows_affected};
+    } else {
+        $rows_affected = 0;
+    }
+    $self->{rows} = $rows_affected;
+
     # Return DBI-compatible value
-    my $rows_affected = $result->{rows_affected} || 0;
     
     if ($rows_affected == 0) {
         return "0E0";  # DBI standard for zero rows
@@ -509,13 +561,59 @@ sub fetchrow_array {
         $self->{finished} = 1;
         return ();
     }
-    
-    if (!$result->{row}) {
+
+    # Extract row data from nested result structure (CPANBridge wraps results)
+    my $row_data;
+    if ($result->{result} && $result->{result}->{row}) {
+        $row_data = $result->{result}->{row};
+    } elsif ($result->{row}) {
+        $row_data = $result->{row};
+    } else {
         $self->{finished} = 1;
         return ();
     }
-    
-    return @{$result->{row}};
+
+    return @{$row_data};
+}
+
+# $sth->fetchrow_arrayref - returns array reference (critical DBI method)
+sub fetchrow_arrayref {
+    my $self = shift;
+
+    unless ($self->{executed}) {
+        $self->_set_error("Statement not executed");
+        return undef;
+    }
+
+    if ($self->{finished}) {
+        return undef;
+    }
+
+    my $result = $self->{parent}->call_python('database', 'fetch_row', {
+        connection_id => $self->{parent}->{connection_id},
+        statement_id => $self->{statement_id},
+        format => 'array'
+    });
+
+    if (!$result || !$result->{success}) {
+        my $error = $result ? $result->{error} : "Unknown fetch error";
+        $self->_set_error($error);
+        $self->{finished} = 1;
+        return undef;
+    }
+
+    # Extract row data from nested result structure (CPANBridge wraps results)
+    my $row_data;
+    if ($result->{result} && $result->{result}->{row}) {
+        $row_data = $result->{result}->{row};
+    } elsif ($result->{row}) {
+        $row_data = $result->{row};
+    } else {
+        $self->{finished} = 1;
+        return undef;
+    }
+
+    return $row_data;  # Return array reference directly
 }
 
 # $sth->fetchrow_hashref - for hash-based access
@@ -537,12 +635,23 @@ sub fetchrow_hashref {
         format => 'hash'
     });
     
-    if (!$result || !$result->{success} || !$result->{row}) {
+    if (!$result || !$result->{success}) {
         $self->{finished} = 1;
         return undef;
     }
-    
-    return $result->{row};
+
+    # Extract row data from nested result structure (CPANBridge wraps results)
+    my $row_data;
+    if ($result->{result} && $result->{result}->{row}) {
+        $row_data = $result->{result}->{row};
+    } elsif ($result->{row}) {
+        $row_data = $result->{row};
+    } else {
+        $self->{finished} = 1;
+        return undef;
+    }
+
+    return $row_data;
 }
 
 # $sth->fetchall_arrayref - for bulk retrieval
@@ -571,10 +680,60 @@ sub fetchall_arrayref {
     }
     
     $self->{finished} = 1;
-    my $rows = $result->{rows} || [];
+
+    # Extract rows from nested result structure (CPANBridge wraps results)
+    my $rows;
+    if ($result->{result} && $result->{result}->{rows}) {
+        $rows = $result->{result}->{rows};
+    } elsif ($result->{rows}) {
+        $rows = $result->{rows};
+    } else {
+        $rows = [];
+    }
+
     $self->{rows} = scalar @$rows;
     
     return $rows;
+}
+
+# $sth->fetch - alias for fetchrow_arrayref (common DBI usage)
+sub fetch {
+    my $self = shift;
+    return $self->fetchrow_arrayref();
+}
+
+# $sth->fetchall_hashref - returns all rows as hash references
+sub fetchall_hashref {
+    my ($self, $key_field) = @_;
+
+    unless ($self->{executed}) {
+        $self->_set_error("Statement not executed");
+        return {};
+    }
+
+    if ($self->{finished}) {
+        return {};
+    }
+
+    # Fetch all remaining rows as hash references
+    my @hash_rows = ();
+    while (my $row_hash = $self->fetchrow_hashref()) {
+        push @hash_rows, $row_hash;
+    }
+
+    # If key_field specified, return as hash keyed by that field
+    if ($key_field) {
+        my %keyed_rows = ();
+        for my $row (@hash_rows) {
+            if (exists $row->{$key_field}) {
+                $keyed_rows{$row->{$key_field}} = $row;
+            }
+        }
+        return \%keyed_rows;
+    }
+
+    # Otherwise return array reference of hash references
+    return \@hash_rows;
 }
 
 # $sth->dump_results - for bulk output in your scripts
@@ -703,7 +862,26 @@ functionality found in your Perl scripts including:
 
 =head1 METHODS
 
-All standard DBI methods are supported with identical interfaces.
+All standard DBI methods are supported with identical interfaces:
+
+=head2 Database Handle Methods
+
+- connect() - Establish database connection
+- prepare() - Prepare SQL statement
+- commit() - Commit transaction
+- rollback() - Rollback transaction
+- disconnect() - Close connection
+
+=head2 Statement Handle Methods
+
+- execute() - Execute prepared statement
+- fetchrow_array() - Fetch row as array
+- fetchrow_arrayref() - Fetch row as array reference
+- fetchrow_hashref() - Fetch row as hash reference
+- fetch() - Alias for fetchrow_arrayref
+- fetchall_arrayref() - Fetch all rows as array references
+- fetchall_hashref() - Fetch all rows as hash references
+- finish() - Finish statement handle
 
 =head1 MIGRATION
 
