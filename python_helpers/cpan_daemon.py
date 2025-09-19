@@ -23,8 +23,13 @@ import time
 import traceback
 import importlib
 import logging
+import psutil
+import resource
 from typing import Dict, Any, Optional
 from pathlib import Path
+from collections import defaultdict
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 
 # Version and configuration
 __version__ = "1.0.0"
@@ -39,6 +44,14 @@ MAX_REQUEST_SIZE = int(os.environ.get('CPAN_BRIDGE_MAX_REQUEST_SIZE', '10485760'
 CONNECTION_TIMEOUT = int(os.environ.get('CPAN_BRIDGE_TIMEOUT', '1800'))  # 30 minutes
 CLEANUP_INTERVAL = int(os.environ.get('CPAN_BRIDGE_CLEANUP_INTERVAL', '300'))  # 5 minutes
 
+# Resource management configuration
+MAX_MEMORY_MB = int(os.environ.get('CPAN_BRIDGE_MAX_MEMORY_MB', '1024'))  # 1GB
+MAX_CPU_PERCENT = float(os.environ.get('CPAN_BRIDGE_MAX_CPU_PERCENT', '200.0'))  # 200% (allows for multi-core burst)
+MAX_REQUESTS_PER_MINUTE = int(os.environ.get('CPAN_BRIDGE_MAX_REQUESTS_PER_MINUTE', '1000'))
+MAX_CONCURRENT_REQUESTS = int(os.environ.get('CPAN_BRIDGE_MAX_CONCURRENT_REQUESTS', '50'))
+STALE_CONNECTION_TIMEOUT = int(os.environ.get('CPAN_BRIDGE_STALE_TIMEOUT', '300'))  # 5 minutes
+RESOURCE_CHECK_INTERVAL = int(os.environ.get('CPAN_BRIDGE_RESOURCE_CHECK_INTERVAL', '60'))  # 1 minute
+
 # Set up logging
 logging.basicConfig(
     level=logging.DEBUG if DEBUG_LEVEL > 0 else logging.INFO,
@@ -51,6 +64,119 @@ logging.basicConfig(
 logger = logging.getLogger('CPANDaemon')
 
 
+@dataclass
+class ConnectionInfo:
+    """Information about an active connection"""
+    client_address: str
+    start_time: datetime
+    last_activity: datetime
+    requests_count: int = 0
+    bytes_sent: int = 0
+    bytes_received: int = 0
+    thread_id: Optional[int] = None
+    status: str = 'active'
+
+
+@dataclass
+class ResourceMetrics:
+    """Resource usage metrics"""
+    timestamp: datetime = field(default_factory=datetime.now)
+    memory_mb: float = 0.0
+    cpu_percent: float = 0.0
+    active_connections: int = 0
+    concurrent_requests: int = 0
+    requests_per_minute: int = 0
+    total_requests: int = 0
+    failed_requests: int = 0
+
+
+class ResourceManager:
+    """Manages resource limits and monitoring"""
+
+    def __init__(self):
+        self.process = psutil.Process()
+        self.request_timestamps = []
+        self.concurrent_requests = 0
+        self.peak_memory = 0.0
+        self.peak_cpu = 0.0
+        self.resource_alerts = defaultdict(int)
+
+    def check_resource_limits(self) -> Dict[str, Any]:
+        """Check if resource limits are exceeded"""
+        current_time = datetime.now()
+
+        # Get current resource usage
+        memory_info = self.process.memory_info()
+        memory_mb = memory_info.rss / 1024 / 1024  # Convert to MB
+        cpu_percent = self.process.cpu_percent()
+
+        # Update peaks
+        self.peak_memory = max(self.peak_memory, memory_mb)
+        self.peak_cpu = max(self.peak_cpu, cpu_percent)
+
+        # Clean old request timestamps (keep last minute)
+        minute_ago = current_time - timedelta(minutes=1)
+        self.request_timestamps = [ts for ts in self.request_timestamps if ts > minute_ago]
+        requests_per_minute = len(self.request_timestamps)
+
+        # Check limits
+        violations = []
+        warnings = []
+
+        if memory_mb > MAX_MEMORY_MB:
+            violations.append(f"Memory usage {memory_mb:.1f}MB exceeds limit {MAX_MEMORY_MB}MB")
+            self.resource_alerts['memory'] += 1
+
+        elif memory_mb > MAX_MEMORY_MB * 0.8:  # 80% warning threshold
+            warnings.append(f"Memory usage {memory_mb:.1f}MB approaching limit {MAX_MEMORY_MB}MB")
+
+        if cpu_percent > MAX_CPU_PERCENT:
+            violations.append(f"CPU usage {cpu_percent:.1f}% exceeds limit {MAX_CPU_PERCENT}%")
+            self.resource_alerts['cpu'] += 1
+
+        elif cpu_percent > MAX_CPU_PERCENT * 0.8:  # 80% warning threshold
+            warnings.append(f"CPU usage {cpu_percent:.1f}% approaching limit {MAX_CPU_PERCENT}%")
+
+        if requests_per_minute > MAX_REQUESTS_PER_MINUTE:
+            violations.append(f"Request rate {requests_per_minute}/min exceeds limit {MAX_REQUESTS_PER_MINUTE}/min")
+            self.resource_alerts['requests'] += 1
+
+        if self.concurrent_requests > MAX_CONCURRENT_REQUESTS:
+            violations.append(f"Concurrent requests {self.concurrent_requests} exceeds limit {MAX_CONCURRENT_REQUESTS}")
+            self.resource_alerts['concurrent'] += 1
+
+        return {
+            'memory_mb': memory_mb,
+            'cpu_percent': cpu_percent,
+            'requests_per_minute': requests_per_minute,
+            'concurrent_requests': self.concurrent_requests,
+            'violations': violations,
+            'warnings': warnings,
+            'peak_memory': self.peak_memory,
+            'peak_cpu': self.peak_cpu,
+            'alerts': dict(self.resource_alerts)
+        }
+
+    def track_request(self):
+        """Track a new request"""
+        self.request_timestamps.append(datetime.now())
+        self.concurrent_requests += 1
+
+    def complete_request(self):
+        """Mark a request as completed"""
+        self.concurrent_requests = max(0, self.concurrent_requests - 1)
+
+    def get_metrics(self) -> ResourceMetrics:
+        """Get current resource metrics"""
+        status = self.check_resource_limits()
+        return ResourceMetrics(
+            memory_mb=status['memory_mb'],
+            cpu_percent=status['cpu_percent'],
+            concurrent_requests=status['concurrent_requests'],
+            requests_per_minute=status['requests_per_minute']
+        )
+
+
 class CPANBridgeDaemon:
     """Main daemon class for CPAN Bridge operations"""
 
@@ -59,24 +185,40 @@ class CPANBridgeDaemon:
         self.running = True
         self.server_socket = None
         self.helper_modules = {}
-        self.active_connections = []
+        self.active_connections = {}  # Changed to dict for better tracking
+
+        # Enhanced statistics
         self.stats = {
             'requests_processed': 0,
             'requests_failed': 0,
+            'requests_rejected': 0,
             'start_time': time.time(),
-            'last_cleanup': time.time()
+            'last_cleanup': time.time(),
+            'last_resource_check': time.time(),
+            'connections_total': 0,
+            'connections_rejected': 0,
+            'peak_connections': 0
         }
+
+        # Resource management
+        self.resource_manager = ResourceManager()
+        self.connection_lock = threading.Lock()
 
         # Thread management
         self.threads = []
         self.cleanup_thread = None
         self.health_thread = None
+        self.resource_thread = None
 
         # Setup signal handlers
         signal.signal(signal.SIGTERM, self._signal_handler)
         signal.signal(signal.SIGINT, self._signal_handler)
 
         logger.info(f"CPAN Bridge Daemon v{__version__} initializing...")
+        logger.info(f"Resource limits - Memory: {MAX_MEMORY_MB}MB, CPU: {MAX_CPU_PERCENT}%, "
+                   f"Requests/min: {MAX_REQUESTS_PER_MINUTE}, Concurrent: {MAX_CONCURRENT_REQUESTS}")
+        logger.info(f"Resource monitoring - Stale timeout: {STALE_CONNECTION_TIMEOUT}s, "
+                   f"Check interval: {RESOURCE_CHECK_INTERVAL}s")
 
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals gracefully"""
@@ -142,21 +284,31 @@ class CPANBridgeDaemon:
             if field not in request:
                 raise ValueError(f"Missing required field: {field}")
 
+        module_name = request['module']
+        function_name = request['function']
+
+        # Allow system module for administrative functions
+        if module_name == 'system':
+            allowed_system_functions = ['info', 'shutdown', 'health', 'stats']
+            if function_name not in allowed_system_functions:
+                raise ValueError(f"System function '{function_name}' not allowed")
+            return True  # Skip other validation for system module
+
         # Basic security check - prevent dangerous function names
         dangerous_patterns = ['__', 'eval', 'import', 'subprocess']
-        dangerous_exact = ['exec', 'open', 'file', 'system']
-        function_name = request['function'].lower()
-        module_name = request['module'].lower()
+        dangerous_exact = ['exec', 'open', 'file']
+        function_lower = function_name.lower()
+        module_lower = module_name.lower()
 
         # Check substring patterns
         for pattern in dangerous_patterns:
-            if pattern in function_name or pattern in module_name:
-                raise ValueError(f"Potentially dangerous function/module name: {request['module']}.{request['function']}")
+            if pattern in function_lower or pattern in module_lower:
+                raise ValueError(f"Potentially dangerous function/module name: {module_name}.{function_name}")
 
         # Check exact matches
         for pattern in dangerous_exact:
-            if function_name == pattern or module_name == pattern:
-                raise ValueError(f"Potentially dangerous function/module name: {request['module']}.{request['function']}")
+            if function_lower == pattern or module_lower == pattern:
+                raise ValueError(f"Potentially dangerous function/module name: {module_name}.{function_name}")
 
         # Validate module name format
         if not request['module'].replace('_', '').isalnum():
@@ -309,25 +461,65 @@ class CPANBridgeDaemon:
 
     def _handle_client(self, client_socket, client_address):
         """Handle individual client request"""
+        connection_id = f"{client_address}_{threading.get_ident()}_{time.time()}"
+        start_time = datetime.now()
+
+        # Track connection
+        with self.connection_lock:
+            conn_info = ConnectionInfo(
+                client_address=str(client_address),
+                start_time=start_time,
+                last_activity=start_time,
+                thread_id=threading.get_ident()
+            )
+            self.active_connections[connection_id] = conn_info
+            self.stats['connections_total'] += 1
+            self.stats['peak_connections'] = max(self.stats['peak_connections'],
+                                               len(self.active_connections))
+
         try:
-            logger.debug(f"Handling client connection from {client_address}")
+            logger.debug(f"Handling client connection {connection_id}")
 
-            # Read request with size limit
+            # Check resource limits before processing
+            resource_status = self.resource_manager.check_resource_limits()
+            if resource_status['violations']:
+                logger.warning(f"Resource violations detected: {resource_status['violations']}")
+                # Still process but log the violation
+
+            # Track request start
+            self.resource_manager.track_request()
+
+            # Read request with size limit and timeout
+            client_socket.settimeout(30.0)  # 30 second timeout for reading
             data = b''
-            while len(data) < MAX_REQUEST_SIZE:
-                chunk = client_socket.recv(4096)
-                if not chunk:
-                    break
-                data += chunk
+            total_bytes = 0
 
-                # Try to parse JSON to see if we have complete message
+            while len(data) < MAX_REQUEST_SIZE:
                 try:
-                    json.loads(data.decode('utf-8'))
-                    break  # Complete JSON received
-                except json.JSONDecodeError:
-                    continue  # Need more data
+                    chunk = client_socket.recv(4096)
+                    if not chunk:
+                        break
+                    data += chunk
+                    total_bytes += len(chunk)
+
+                    # Update connection activity
+                    with self.connection_lock:
+                        if connection_id in self.active_connections:
+                            self.active_connections[connection_id].last_activity = datetime.now()
+                            self.active_connections[connection_id].bytes_received += len(chunk)
+
+                    # Try to parse JSON to see if we have complete message
+                    try:
+                        json.loads(data.decode('utf-8'))
+                        break  # Complete JSON received
+                    except json.JSONDecodeError:
+                        continue  # Need more data
+
+                except socket.timeout:
+                    raise ValueError("Request timeout - data transmission too slow")
 
             if len(data) >= MAX_REQUEST_SIZE:
+                self.stats['requests_rejected'] += 1
                 raise ValueError(f"Request too large: {len(data)} bytes (max: {MAX_REQUEST_SIZE})")
 
             if not data:
@@ -338,6 +530,11 @@ class CPANBridgeDaemon:
             request = json.loads(request_str)
 
             logger.debug(f"Received request: {request.get('module', 'unknown')}.{request.get('function', 'unknown')}")
+
+            # Update connection request count
+            with self.connection_lock:
+                if connection_id in self.active_connections:
+                    self.active_connections[connection_id].requests_count += 1
 
             # Validate and route request
             self._validate_request(request)
@@ -394,6 +591,28 @@ class CPANBridgeDaemon:
 
                 logger.debug("Running periodic cleanup...")
 
+                # Clean up stale connections
+                current_time = datetime.now()
+                stale_connections = []
+
+                with self.connection_lock:
+                    for conn_id, conn_info in list(self.active_connections.items()):
+                        time_since_activity = (current_time - conn_info.last_activity).total_seconds()
+                        if time_since_activity > STALE_CONNECTION_TIMEOUT:
+                            stale_connections.append(conn_id)
+                            logger.debug(f"Found stale connection {conn_id} - {time_since_activity:.1f}s since last activity")
+
+                    # Remove stale connections
+                    for conn_id in stale_connections:
+                        try:
+                            del self.active_connections[conn_id]
+                            logger.debug(f"Removed stale connection {conn_id}")
+                        except Exception as e:
+                            logger.warning(f"Error removing stale connection {conn_id}: {e}")
+
+                if stale_connections:
+                    logger.info(f"Cleaned up {len(stale_connections)} stale connections")
+
                 # Clean up any stale resources in helper modules
                 for module_name, module in self.helper_modules.items():
                     if hasattr(module, 'cleanup_stale_resources'):
@@ -428,10 +647,61 @@ class CPANBridgeDaemon:
                            f"Errors: {self.stats['requests_failed']}, "
                            f"Active connections: {len(self.active_connections)}")
 
+                # Log resource status if there are issues
+                try:
+                    resource_status = self.resource_manager.check_resource_limits()
+                    if resource_status['violations']:
+                        logger.warning(f"Resource violations: {resource_status['violations']}")
+                    elif resource_status['warnings']:
+                        logger.info(f"Resource warnings: {resource_status['warnings']}")
+                except Exception as e:
+                    logger.error(f"Error checking resource limits: {e}")
+
             except Exception as e:
                 logger.error(f"Error in health thread: {e}")
 
         logger.info("Health monitoring thread stopped")
+
+    def _resource_thread_func(self):
+        """Background thread for resource monitoring"""
+        logger.info("Resource monitoring thread started")
+
+        while self.running:
+            try:
+                time.sleep(RESOURCE_CHECK_INTERVAL)
+                if not self.running:
+                    break
+
+                # Check resource limits
+                resource_status = self.resource_manager.check_resource_limits()
+                current_time = time.time()
+                self.stats['last_resource_check'] = current_time
+
+                # Log violations and warnings
+                if resource_status['violations']:
+                    logger.critical(f"RESOURCE VIOLATION: {resource_status['violations']}")
+                    logger.critical(f"Memory: {resource_status['memory_mb']:.1f}MB, "
+                                  f"CPU: {resource_status['cpu_percent']:.1f}%, "
+                                  f"Requests/min: {resource_status['requests_per_minute']}, "
+                                  f"Concurrent: {resource_status['concurrent_requests']}")
+
+                elif resource_status['warnings']:
+                    logger.warning(f"Resource warning: {resource_status['warnings']}")
+
+                # Log periodic resource summary
+                if current_time % 300 < RESOURCE_CHECK_INTERVAL:  # Every 5 minutes
+                    logger.info(f"Resource summary - "
+                               f"Memory: {resource_status['memory_mb']:.1f}MB "
+                               f"(peak: {resource_status['peak_memory']:.1f}MB), "
+                               f"CPU: {resource_status['cpu_percent']:.1f}% "
+                               f"(peak: {resource_status['peak_cpu']:.1f}%), "
+                               f"Concurrent requests: {resource_status['concurrent_requests']}, "
+                               f"Requests/min: {resource_status['requests_per_minute']}")
+
+            except Exception as e:
+                logger.error(f"Error in resource thread: {e}")
+
+        logger.info("Resource monitoring thread stopped")
 
     def _create_socket(self):
         """Create and configure Unix domain socket"""
@@ -469,9 +739,11 @@ class CPANBridgeDaemon:
             logger.info("Starting background threads...")
             self.cleanup_thread = threading.Thread(target=self._cleanup_thread_func, daemon=True)
             self.health_thread = threading.Thread(target=self._health_thread_func, daemon=True)
+            self.resource_thread = threading.Thread(target=self._resource_thread_func, daemon=True)
 
             self.cleanup_thread.start()
             self.health_thread.start()
+            self.resource_thread.start()
 
             logger.info(f"CPAN Bridge Daemon v{__version__} started successfully")
             logger.info(f"Listening on {SOCKET_PATH}")
@@ -480,6 +752,19 @@ class CPANBridgeDaemon:
             # Main server loop
             while self.running:
                 try:
+                    # Check connection limits before accepting
+                    if len(self.active_connections) >= MAX_CONNECTIONS:
+                        logger.warning(f"Connection limit reached ({MAX_CONNECTIONS}), rejecting new connections")
+                        time.sleep(0.1)  # Brief pause to prevent tight loop
+                        continue
+
+                    # Check resource limits before accepting
+                    resource_status = self.resource_manager.check_resource_limits()
+                    if resource_status['violations']:
+                        logger.warning(f"Resource violations detected, throttling connections: {resource_status['violations']}")
+                        time.sleep(1.0)  # Longer pause under resource pressure
+                        continue
+
                     # Accept connections with timeout
                     self.server_socket.settimeout(1.0)
                     client_socket, client_address = self.server_socket.accept()
