@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-helpers/xml.py - Production-ready XML processing for XMLHelper.pm
+helpers/xml_helper.py - Production-ready XML processing for XMLHelper.pm
 
 Provides XML parsing and generation functionality that matches XML::Simple behavior
 for use in the RHEL 9 migration project.

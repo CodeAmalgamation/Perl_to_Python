@@ -102,10 +102,9 @@ class CPANBridgeDaemon:
         # List of helper modules to try loading
         helper_modules = [
             'database',         # Database operations (Oracle, Informix, etc.)
-            'xml',             # XML parsing and manipulation
+            'xml_helper',      # XML parsing and manipulation
             'xpath',           # XPath processing with lxml
             'http',            # HTTP requests and web operations
-            'dates',           # Date parsing and manipulation
             'datetime_helper', # DateTime operations
             'crypto',          # Cryptography operations
             'email_helper',    # Email sending
