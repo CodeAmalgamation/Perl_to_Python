@@ -7,8 +7,10 @@ use JSON;
 use Carp;
 use FindBin;
 use File::Spec;
+use IO::Socket::UNIX;
+use Time::HiRes qw(time sleep);
 
-our $VERSION = '1.01';
+our $VERSION = '2.00';
 
 # Global configuration
 our $PYTHON_BRIDGE_SCRIPT = undef;
@@ -17,6 +19,14 @@ our $TIMEOUT = 60;
 our $MAX_JSON_SIZE = 10_000_000;  # 10MB default
 our $RETRY_COUNT = 3;
 our $PYTHON_PATH = undef;
+
+# Daemon configuration
+our $DAEMON_MODE = $ENV{CPAN_BRIDGE_DAEMON} // 1;          # Enable daemon by default
+our $FALLBACK_ENABLED = $ENV{CPAN_BRIDGE_FALLBACK} // 1;   # Enable fallback by default
+our $DAEMON_SOCKET = $ENV{CPAN_BRIDGE_SOCKET} || '/tmp/cpan_bridge.sock';
+our $DAEMON_TIMEOUT = $ENV{CPAN_BRIDGE_DAEMON_TIMEOUT} || 30;
+our $DAEMON_STARTUP_TIMEOUT = $ENV{CPAN_BRIDGE_STARTUP_TIMEOUT} || 10;
+our $DAEMON_SCRIPT = undef;
 
 sub new {
     my ($class, %args) = @_;
@@ -76,21 +86,21 @@ sub _init_python_bridge {
 # Main method to call Python functions
 sub call_python {
     my ($self, $module, $function, $params) = @_;
-    
+
     croak "Module name required" unless $module;
     croak "Function name required" unless $function;
-    
+
     $params ||= {};
-    
+
     # Performance tracking
     my $start_time = time();
-    
+
     # Check for large data
     my $json_size = length($self->_safe_json_encode($params));
     if ($json_size > $self->{max_json_size}) {
         $self->_debug("Large data detected ($json_size bytes), may be slow");
     }
-    
+
     # Prepare request data
     my $request = {
         module => $module,
@@ -99,13 +109,26 @@ sub call_python {
         timestamp => time(),
         perl_caller => (caller(1))[3] || 'unknown',
         request_id => $self->_generate_request_id(),
+        client_version => $VERSION,
     };
-    
+
     $self->_debug("Calling Python: $module->$function");
     $self->_debug("Request data: " . $self->_safe_json_encode($request)) if $self->{debug} > 2;
-    
-    # Execute with retry logic
-    my $result = $self->_execute_with_retry($request);
+
+    # Try daemon mode first, fall back to process mode on failure
+    my $result;
+    if ($DAEMON_MODE) {
+        $result = $self->_try_daemon_call($request);
+
+        # If daemon call failed and fallback is enabled, try process mode
+        if (!$result->{success} && $FALLBACK_ENABLED) {
+            $self->_debug("Daemon call failed, falling back to process mode");
+            $result = $self->_execute_with_retry($request);
+        }
+    } else {
+        # Direct process mode
+        $result = $self->_execute_with_retry($request);
+    }
     
     # Performance tracking
     my $duration = time() - $start_time;
@@ -521,6 +544,276 @@ sub clear_performance_stats {
 }
 
 # Cleanup
+# ===== DAEMON COMMUNICATION METHODS =====
+
+# Try to call function via daemon
+sub _try_daemon_call {
+    my ($self, $request) = @_;
+
+    # Try daemon communication up to 3 times
+    for my $attempt (1..3) {
+        $self->_debug("Daemon attempt $attempt of 3");
+
+        # Ensure daemon is running
+        unless ($self->_ensure_daemon_running()) {
+            $self->_debug("Daemon not available for attempt $attempt");
+            next if $attempt < 3;
+            return {
+                success => 0,
+                error => "Daemon not available after 3 attempts",
+                daemon_error => 1
+            };
+        }
+
+        # Try to connect and send request
+        my $result = $self->_send_daemon_request($request);
+        return $result if $result->{success};
+
+        # If connection failed, daemon might be dead
+        if ($result->{error} && $result->{error} =~ /Connection refused|No such file/) {
+            $self->_debug("Daemon appears to be dead, will try to restart");
+            # Don't immediately retry - let next iteration handle restart
+        }
+    }
+
+    return {
+        success => 0,
+        error => "Daemon communication failed after 3 attempts",
+        daemon_error => 1
+    };
+}
+
+# Ensure daemon is running
+sub _ensure_daemon_running {
+    my $self = shift;
+
+    # Check if daemon socket exists and is responsive
+    return 1 if $self->_ping_daemon();
+
+    # Try to start daemon
+    $self->_debug("Daemon not responsive, attempting to start");
+    return $self->_start_daemon();
+}
+
+# Ping daemon to check if it's alive
+sub _ping_daemon {
+    my $self = shift;
+
+    return 0 unless -S $DAEMON_SOCKET;
+
+    my $ping_successful = 0;
+
+    eval {
+        my $socket = IO::Socket::UNIX->new(
+            Peer => $DAEMON_SOCKET,
+            Type => SOCK_STREAM,
+            Timeout => 2
+        );
+
+        return unless $socket;
+
+        # Send ping request
+        my $ping_request = $self->_safe_json_encode({
+            module => 'test',
+            function => 'ping',
+            params => {},
+            timestamp => time()
+        });
+
+        $socket->print($ping_request);
+        $socket->shutdown(1);  # Close write end
+
+        # Read response with timeout
+        my $response = '';
+        eval {
+            local $SIG{ALRM} = sub { die "timeout" };
+            alarm(2);
+            while (my $line = <$socket>) {
+                $response .= $line;
+            }
+            alarm(0);
+        };
+
+        $socket->close();
+
+        if ($response) {
+            my $result = $self->_safe_json_decode($response);
+            if ($result && $result->{success}) {
+                $ping_successful = 1;
+                $self->_debug("Daemon ping successful");
+            } else {
+                $self->_debug("Daemon ping failed: invalid response");
+            }
+        } else {
+            $self->_debug("Daemon ping failed: empty response");
+        }
+    };
+
+    if ($@) {
+        $self->_debug("Daemon ping failed: $@");
+    }
+
+    return $ping_successful;
+}
+
+# Start daemon process
+sub _start_daemon {
+    my $self = shift;
+
+    my $daemon_script = $self->_find_daemon_script();
+    return 0 unless $daemon_script;
+
+    $self->_debug("Starting daemon: $daemon_script");
+
+    # Start daemon in background
+    my $pid = fork();
+    if (!defined $pid) {
+        $self->_debug("Failed to fork daemon process: $!");
+        return 0;
+    }
+
+    if ($pid == 0) {
+        # Child process - start daemon
+        # Close standard handles to detach
+        close STDIN;
+        close STDOUT;
+        close STDERR;
+
+        # Execute daemon
+        exec($self->_get_python_executable(), $daemon_script);
+        exit(1);  # Should never reach here
+    }
+
+    # Parent process - wait for daemon to start
+    $self->_debug("Daemon process started with PID $pid, waiting for socket...");
+
+    for my $i (1..$DAEMON_STARTUP_TIMEOUT) {
+        sleep(1);
+        if (-S $DAEMON_SOCKET && $self->_ping_daemon()) {
+            $self->_debug("Daemon started successfully");
+            return 1;
+        }
+    }
+
+    $self->_debug("Daemon failed to start within timeout");
+    return 0;
+}
+
+# Find daemon script
+sub _find_daemon_script {
+    my $self = shift;
+
+    return $DAEMON_SCRIPT if $DAEMON_SCRIPT;
+
+    # Search paths for daemon script
+    my @search_paths = (
+        File::Spec->catfile($FindBin::Bin, 'python_helpers', 'cpan_daemon.py'),
+        File::Spec->catfile($FindBin::Bin, '..', 'python_helpers', 'cpan_daemon.py'),
+        File::Spec->catfile($FindBin::Bin, 'cpan_daemon.py'),
+        '/opt/controlm/scripts/python_helpers/cpan_daemon.py',
+        '/usr/local/scripts/python_helpers/cpan_daemon.py',
+        './python_helpers/cpan_daemon.py',
+    );
+
+    # Check environment variable override
+    if ($ENV{CPAN_BRIDGE_DAEMON_SCRIPT}) {
+        unshift @search_paths, $ENV{CPAN_BRIDGE_DAEMON_SCRIPT};
+    }
+
+    for my $path (@search_paths) {
+        if (-f $path && -r $path) {
+            $DAEMON_SCRIPT = $path;
+            $self->_debug("Found daemon script at: $path");
+            return $path;
+        }
+    }
+
+    $self->_debug("Daemon script not found. Searched: " . join(', ', @search_paths));
+    return undef;
+}
+
+# Send request to daemon
+sub _send_daemon_request {
+    my ($self, $request) = @_;
+
+    eval {
+        # Connect to daemon
+        my $socket = IO::Socket::UNIX->new(
+            Peer => $DAEMON_SOCKET,
+            Type => SOCK_STREAM,
+            Timeout => $DAEMON_TIMEOUT
+        );
+
+        unless ($socket) {
+            return {
+                success => 0,
+                error => "Failed to connect to daemon: $!",
+                daemon_error => 1
+            };
+        }
+
+        # Send request
+        my $request_json = $self->_safe_json_encode($request);
+        $socket->print($request_json);
+        $socket->shutdown(1);  # Close write end
+
+        # Read response
+        my $response = '';
+        while (my $line = <$socket>) {
+            $response .= $line;
+        }
+
+        $socket->close();
+
+        unless ($response) {
+            return {
+                success => 0,
+                error => "Empty response from daemon",
+                daemon_error => 1
+            };
+        }
+
+        # Parse response
+        my $result = $self->_safe_json_decode($response);
+        unless ($result) {
+            return {
+                success => 0,
+                error => "Invalid JSON response from daemon",
+                daemon_error => 1
+            };
+        }
+
+        return $result;
+
+    } or do {
+        my $error = $@ || 'Unknown error';
+        return {
+            success => 0,
+            error => "Daemon communication error: $error",
+            daemon_error => 1
+        };
+    };
+}
+
+# Get Python executable
+sub _get_python_executable {
+    my $self = shift;
+
+    # Check environment variable
+    return $ENV{PYTHON_EXECUTABLE} if $ENV{PYTHON_EXECUTABLE};
+
+    # Try common Python executables
+    for my $python ('python3', 'python') {
+        my $path = `which $python 2>/dev/null`;
+        chomp $path;
+        return $python if $path && -x $path;
+    }
+
+    return 'python3';  # Default fallback
+}
+
+# ===== END DAEMON METHODS =====
+
 sub DESTROY {
     my $self = shift;
     # Any cleanup needed
