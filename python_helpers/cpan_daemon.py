@@ -88,8 +88,8 @@ security_logger.setLevel(logging.INFO)
 class ConnectionInfo:
     """Information about an active connection"""
     client_address: str
-    start_time: datetime
-    last_activity: datetime
+    start_time: float  # Use timestamp for consistency
+    last_activity: float  # Use timestamp for consistency
     requests_count: int = 0
     bytes_sent: int = 0
     bytes_received: int = 0
@@ -212,7 +212,8 @@ class RequestValidator:
             "sftp": ["connect", "put", "get", "delete", "list_files", "disconnect"],
             # Administrative modules
             "test": ["ping", "health", "stats", "echo"],
-            "system": ["info", "shutdown", "health", "stats"]
+            "system": ["info", "shutdown", "health", "stats", "performance", "connections",
+                      "cleanup", "metrics"]
         }
 
     def _load_security_patterns(self) -> Dict[str, List[str]]:
@@ -368,20 +369,21 @@ class RequestValidator:
                 ))
                 break
 
-        # Check for dangerous function names
-        for dangerous in self.security_patterns["dangerous_functions"]:
-            if dangerous in function_name.lower() or dangerous in module_name.lower():
-                result.is_valid = False
-                result.errors.append(f"Dangerous function/module name detected: {dangerous}")
-                result.security_events.append(SecurityEvent(
-                    event_type="dangerous_function",
-                    severity="error",
-                    client_info=client_info,
-                    request_id=request_id,
-                    module=module_name,
-                    function=function_name,
-                    details={"dangerous_pattern": dangerous}
-                ))
+        # Check for dangerous function names (but exempt whitelisted modules)
+        if module_name not in ['system', 'test']:  # Exempt administrative modules
+            for dangerous in self.security_patterns["dangerous_functions"]:
+                if dangerous in function_name.lower() or dangerous in module_name.lower():
+                    result.is_valid = False
+                    result.errors.append(f"Dangerous function/module name detected: {dangerous}")
+                    result.security_events.append(SecurityEvent(
+                        event_type="dangerous_function",
+                        severity="error",
+                        client_info=client_info,
+                        request_id=request_id,
+                        module=module_name,
+                        function=function_name,
+                        details={"dangerous_pattern": dangerous}
+                    ))
 
         # Check for SQL injection patterns
         for pattern in self.security_patterns["suspicious_strings"]:
@@ -554,6 +556,414 @@ class SecurityLogger:
         }
 
 
+class PerformanceMonitor:
+    """Advanced performance monitoring and metrics collection"""
+
+    def __init__(self):
+        self.start_time = time.time()
+        self.request_latencies = []
+        self.error_history = []
+        self.performance_metrics = {
+            'total_requests': 0,
+            'successful_requests': 0,
+            'failed_requests': 0,
+            'avg_response_time': 0.0,
+            'p95_response_time': 0.0,
+            'p99_response_time': 0.0,
+            'requests_per_second': 0.0,
+            'error_rate': 0.0,
+            'uptime_seconds': 0.0
+        }
+        self.module_metrics = defaultdict(lambda: {
+            'request_count': 0,
+            'total_time': 0.0,
+            'avg_time': 0.0,
+            'error_count': 0,
+            'error_rate': 0.0
+        })
+
+    def record_request(self, module: str, function: str, duration: float, success: bool, error: str = None):
+        """Record request performance metrics"""
+        current_time = time.time()
+
+        # Update global metrics
+        self.performance_metrics['total_requests'] += 1
+        if success:
+            self.performance_metrics['successful_requests'] += 1
+        else:
+            self.performance_metrics['failed_requests'] += 1
+            self.error_history.append({
+                'timestamp': current_time,
+                'module': module,
+                'function': function,
+                'error': error,
+                'duration': duration
+            })
+
+        # Record latency
+        self.request_latencies.append({
+            'timestamp': current_time,
+            'duration': duration,
+            'module': module,
+            'function': function,
+            'success': success
+        })
+
+        # Clean old latency data (keep last 1000)
+        if len(self.request_latencies) > 1000:
+            self.request_latencies = self.request_latencies[-1000:]
+
+        # Clean old error data (keep last 500)
+        if len(self.error_history) > 500:
+            self.error_history = self.error_history[-500:]
+
+        # Update module-specific metrics
+        module_key = f"{module}.{function}"
+        module_stats = self.module_metrics[module_key]
+        module_stats['request_count'] += 1
+        module_stats['total_time'] += duration
+        module_stats['avg_time'] = module_stats['total_time'] / module_stats['request_count']
+
+        if not success:
+            module_stats['error_count'] += 1
+            module_stats['error_rate'] = module_stats['error_count'] / module_stats['request_count']
+
+        # Update computed metrics
+        self._update_computed_metrics()
+
+    def _update_computed_metrics(self):
+        """Update computed performance metrics"""
+        current_time = time.time()
+
+        # Calculate uptime
+        self.performance_metrics['uptime_seconds'] = current_time - self.start_time
+
+        if not self.request_latencies:
+            return
+
+        # Calculate response time statistics
+        recent_latencies = [req['duration'] for req in self.request_latencies[-100:]]  # Last 100 requests
+        if recent_latencies:
+            self.performance_metrics['avg_response_time'] = sum(recent_latencies) / len(recent_latencies)
+            sorted_latencies = sorted(recent_latencies)
+            n = len(sorted_latencies)
+            self.performance_metrics['p95_response_time'] = sorted_latencies[int(n * 0.95)] if n > 0 else 0
+            self.performance_metrics['p99_response_time'] = sorted_latencies[int(n * 0.99)] if n > 0 else 0
+
+        # Calculate requests per second (last minute)
+        minute_ago = current_time - 60
+        recent_requests = [req for req in self.request_latencies if req['timestamp'] > minute_ago]
+        self.performance_metrics['requests_per_second'] = len(recent_requests) / 60.0
+
+        # Calculate error rate (last 100 requests)
+        recent_errors = sum(1 for req in self.request_latencies[-100:] if not req['success'])
+        recent_total = min(100, len(self.request_latencies))
+        self.performance_metrics['error_rate'] = (recent_errors / recent_total) if recent_total > 0 else 0.0
+
+    def get_performance_report(self) -> Dict[str, Any]:
+        """Get comprehensive performance report"""
+        self._update_computed_metrics()
+
+        # Get top performing modules
+        top_modules = sorted(
+            [(k, v) for k, v in self.module_metrics.items() if v['request_count'] > 0],
+            key=lambda x: x[1]['request_count'],
+            reverse=True
+        )[:10]
+
+        # Get recent errors
+        recent_errors = self.error_history[-10:] if self.error_history else []
+
+        return {
+            'performance_metrics': self.performance_metrics.copy(),
+            'module_performance': {
+                'top_modules': [
+                    {
+                        'module_function': mod,
+                        'requests': stats['request_count'],
+                        'avg_time_ms': round(stats['avg_time'] * 1000, 2),
+                        'error_rate': round(stats['error_rate'] * 100, 2)
+                    }
+                    for mod, stats in top_modules
+                ],
+                'total_modules': len(self.module_metrics)
+            },
+            'recent_errors': [
+                {
+                    'timestamp': error['timestamp'],
+                    'module_function': f"{error['module']}.{error['function']}",
+                    'error': error['error'],
+                    'duration_ms': round(error['duration'] * 1000, 2)
+                }
+                for error in recent_errors
+            ],
+            'health_indicators': self._get_health_indicators()
+        }
+
+    def _get_health_indicators(self) -> Dict[str, Any]:
+        """Calculate health indicators"""
+        indicators = {
+            'overall_health': 'healthy',
+            'concerns': [],
+            'recommendations': []
+        }
+
+        metrics = self.performance_metrics
+
+        # Check error rate
+        if metrics['error_rate'] > 0.05:  # 5% error rate
+            indicators['overall_health'] = 'degraded'
+            indicators['concerns'].append(f"High error rate: {metrics['error_rate']:.1%}")
+            indicators['recommendations'].append("Investigate recent errors and performance issues")
+
+        # Check response time
+        if metrics['avg_response_time'] > 1.0:  # 1 second average
+            indicators['overall_health'] = 'degraded' if indicators['overall_health'] == 'healthy' else indicators['overall_health']
+            indicators['concerns'].append(f"Slow response time: {metrics['avg_response_time']:.2f}s")
+            indicators['recommendations'].append("Check resource usage and optimize slow operations")
+
+        # Check requests per second
+        if metrics['requests_per_second'] > 50:  # High load threshold
+            indicators['concerns'].append(f"High load: {metrics['requests_per_second']:.1f} req/s")
+            indicators['recommendations'].append("Monitor resource usage and consider scaling")
+
+        return indicators
+
+
+class HealthChecker:
+    """Comprehensive system health monitoring"""
+
+    def __init__(self, daemon_instance):
+        self.daemon = daemon_instance
+        self.health_history = []
+
+    def perform_health_check(self) -> Dict[str, Any]:
+        """Perform comprehensive health check"""
+        check_time = datetime.now()
+        health_status = {
+            'timestamp': check_time.isoformat(),
+            'overall_status': 'healthy',
+            'checks': {},
+            'warnings': [],
+            'errors': []
+        }
+
+        # Check daemon components
+        self._check_daemon_components(health_status)
+        self._check_resource_usage(health_status)
+        self._check_helper_modules(health_status)
+        self._check_socket_connectivity(health_status)
+        self._check_performance_indicators(health_status)
+
+        # Determine overall status
+        if health_status['errors']:
+            health_status['overall_status'] = 'unhealthy'
+        elif health_status['warnings']:
+            health_status['overall_status'] = 'degraded'
+
+        # Store health history
+        self.health_history.append(health_status)
+        if len(self.health_history) > 100:  # Keep last 100 checks
+            self.health_history = self.health_history[-100:]
+
+        return health_status
+
+    def _check_daemon_components(self, health_status: Dict[str, Any]):
+        """Check core daemon components"""
+        checks = health_status['checks']
+
+        # Check if daemon is running
+        checks['daemon_running'] = {
+            'status': 'pass',
+            'message': 'Daemon is running and responsive'
+        }
+
+        # Check thread health
+        active_threads = len([t for t in self.daemon.threads if t.is_alive()])
+        checks['thread_health'] = {
+            'status': 'pass' if active_threads < 100 else 'warn',
+            'message': f'{active_threads} active threads',
+            'details': {'active_threads': active_threads}
+        }
+
+        if active_threads > 100:
+            health_status['warnings'].append(f"High thread count: {active_threads}")
+
+    def _check_resource_usage(self, health_status: Dict[str, Any]):
+        """Check system resource usage"""
+        checks = health_status['checks']
+
+        try:
+            # Memory usage
+            memory_info = self.daemon.resource_manager.process.memory_info()
+            memory_mb = memory_info.rss / 1024 / 1024
+
+            checks['memory_usage'] = {
+                'status': 'pass' if memory_mb < 500 else 'warn' if memory_mb < 1000 else 'fail',
+                'message': f'{memory_mb:.1f} MB memory usage',
+                'details': {'memory_mb': memory_mb}
+            }
+
+            if memory_mb > 1000:
+                health_status['errors'].append(f"High memory usage: {memory_mb:.1f} MB")
+            elif memory_mb > 500:
+                health_status['warnings'].append(f"Elevated memory usage: {memory_mb:.1f} MB")
+
+            # CPU usage
+            cpu_percent = self.daemon.resource_manager.process.cpu_percent()
+            checks['cpu_usage'] = {
+                'status': 'pass' if cpu_percent < 80 else 'warn' if cpu_percent < 95 else 'fail',
+                'message': f'{cpu_percent:.1f}% CPU usage',
+                'details': {'cpu_percent': cpu_percent}
+            }
+
+            if cpu_percent > 95:
+                health_status['errors'].append(f"High CPU usage: {cpu_percent:.1f}%")
+            elif cpu_percent > 80:
+                health_status['warnings'].append(f"Elevated CPU usage: {cpu_percent:.1f}%")
+
+        except Exception as e:
+            checks['resource_usage'] = {
+                'status': 'fail',
+                'message': f'Resource check failed: {str(e)}'
+            }
+            health_status['errors'].append(f"Resource monitoring error: {str(e)}")
+
+    def _check_helper_modules(self, health_status: Dict[str, Any]):
+        """Check helper module availability"""
+        checks = health_status['checks']
+
+        loaded_modules = len(self.daemon.helper_modules)
+        expected_modules = ['test', 'http', 'datetime_helper', 'crypto', 'email_helper',
+                           'logging_helper', 'excel', 'sftp', 'xpath']  # Core modules
+
+        checks['helper_modules'] = {
+            'status': 'pass' if loaded_modules >= len(expected_modules) * 0.8 else 'warn',
+            'message': f'{loaded_modules} helper modules loaded',
+            'details': {
+                'loaded_modules': list(self.daemon.helper_modules.keys()),
+                'expected_count': len(expected_modules)
+            }
+        }
+
+        if loaded_modules < len(expected_modules) * 0.8:
+            health_status['warnings'].append(f"Some helper modules missing: {loaded_modules}/{len(expected_modules)}")
+
+    def _check_socket_connectivity(self, health_status: Dict[str, Any]):
+        """Check socket connectivity"""
+        checks = health_status['checks']
+
+        try:
+            # Check if socket file exists and is accessible
+            socket_path = SOCKET_PATH
+            if os.path.exists(socket_path):
+                checks['socket_connectivity'] = {
+                    'status': 'pass',
+                    'message': 'Socket file exists and accessible',
+                    'details': {'socket_path': socket_path}
+                }
+            else:
+                checks['socket_connectivity'] = {
+                    'status': 'fail',
+                    'message': 'Socket file not found'
+                }
+                health_status['errors'].append("Socket file not accessible")
+
+        except Exception as e:
+            checks['socket_connectivity'] = {
+                'status': 'fail',
+                'message': f'Socket check failed: {str(e)}'
+            }
+            health_status['errors'].append(f"Socket connectivity error: {str(e)}")
+
+    def _check_performance_indicators(self, health_status: Dict[str, Any]):
+        """Check performance indicators"""
+        checks = health_status['checks']
+
+        try:
+            performance_report = self.daemon.performance_monitor.get_performance_report()
+            metrics = performance_report['performance_metrics']
+            health_indicators = performance_report['health_indicators']
+
+            checks['performance'] = {
+                'status': 'pass' if health_indicators['overall_health'] == 'healthy' else 'warn',
+                'message': f"Performance: {health_indicators['overall_health']}",
+                'details': {
+                    'error_rate': f"{metrics['error_rate']:.1%}",
+                    'avg_response_time': f"{metrics['avg_response_time']:.3f}s",
+                    'requests_per_second': f"{metrics['requests_per_second']:.1f}"
+                }
+            }
+
+            if health_indicators['concerns']:
+                health_status['warnings'].extend(health_indicators['concerns'])
+
+        except Exception as e:
+            checks['performance'] = {
+                'status': 'fail',
+                'message': f'Performance check failed: {str(e)}'
+            }
+            health_status['errors'].append(f"Performance monitoring error: {str(e)}")
+
+
+class ConnectionManager:
+    """Advanced connection management and monitoring"""
+
+    def __init__(self, daemon_instance):
+        self.daemon = daemon_instance
+
+    def get_connection_status(self) -> Dict[str, Any]:
+        """Get detailed connection status"""
+        current_time = time.time()
+        connections = []
+
+        for conn_id, conn_info in self.daemon.active_connections.items():
+            connection_duration = current_time - conn_info.start_time
+            connections.append({
+                'connection_id': conn_id,
+                'start_time': datetime.fromtimestamp(conn_info.start_time).isoformat(),
+                'duration_seconds': round(connection_duration, 2),
+                'requests_count': conn_info.requests_count,
+                'last_activity': datetime.fromtimestamp(conn_info.last_activity).isoformat(),
+                'idle_time': round(current_time - conn_info.last_activity, 2),
+                'status': 'active' if connection_duration < STALE_CONNECTION_TIMEOUT else 'stale'
+            })
+
+        # Sort by start time (newest first)
+        connections.sort(key=lambda x: x['start_time'], reverse=True)
+
+        return {
+            'total_connections': len(connections),
+            'active_connections': len([c for c in connections if c['status'] == 'active']),
+            'stale_connections': len([c for c in connections if c['status'] == 'stale']),
+            'connections': connections,
+            'connection_limits': {
+                'max_concurrent': MAX_CONCURRENT_REQUESTS,
+                'stale_timeout': STALE_CONNECTION_TIMEOUT
+            }
+        }
+
+    def cleanup_stale_connections(self) -> Dict[str, Any]:
+        """Force cleanup of stale connections"""
+        current_time = time.time()
+        stale_connections = []
+
+        for conn_id, conn_info in list(self.daemon.active_connections.items()):
+            idle_time = current_time - conn_info.last_activity
+            if idle_time > STALE_CONNECTION_TIMEOUT:
+                stale_connections.append({
+                    'connection_id': conn_id,
+                    'idle_time': idle_time
+                })
+                del self.daemon.active_connections[conn_id]
+
+        return {
+            'cleaned_connections': len(stale_connections),
+            'connections_details': stale_connections,
+            'remaining_connections': len(self.daemon.active_connections)
+        }
+
+
 class ResourceManager:
     """Manages resource limits and monitoring"""
 
@@ -673,6 +1083,11 @@ class CPANBridgeDaemon:
         # Enhanced validation and security
         self.validator = RequestValidator()
         self.security_logger = SecurityLogger()
+
+        # Operational monitoring components
+        self.performance_monitor = PerformanceMonitor()
+        self.health_checker = HealthChecker(self)
+        self.connection_manager = ConnectionManager(self)
 
         # Thread management
         self.threads = []
@@ -884,11 +1299,6 @@ class CPANBridgeDaemon:
                 }
             }
 
-        elif function_name == 'stats':
-            return {
-                'success': True,
-                'result': self.stats.copy()
-            }
 
         else:
             raise ValueError(f"Unknown test function: {function_name}")
@@ -906,6 +1316,8 @@ class CPANBridgeDaemon:
                     'working_directory': os.getcwd(),
                     'socket_path': SOCKET_PATH,
                     'uptime': time.time() - self.stats['start_time'],
+                    'loaded_modules': list(self.helper_modules.keys()),
+                    'active_connections': len(self.active_connections),
                     'configuration': {
                         'max_connections': MAX_CONNECTIONS,
                         'max_request_size': MAX_REQUEST_SIZE,
@@ -923,13 +1335,110 @@ class CPANBridgeDaemon:
                 'result': {'message': 'Shutdown initiated'}
             }
 
+        elif function_name == 'health':
+            # Comprehensive health check
+            health_status = self.health_checker.perform_health_check()
+            return {
+                'success': True,
+                'result': health_status
+            }
+
+        elif function_name == 'performance':
+            # Detailed performance report
+            performance_report = self.performance_monitor.get_performance_report()
+            return {
+                'success': True,
+                'result': performance_report
+            }
+
+        elif function_name == 'connections':
+            # Connection management and status
+            connection_status = self.connection_manager.get_connection_status()
+            return {
+                'success': True,
+                'result': connection_status
+            }
+
+        elif function_name == 'cleanup':
+            # Force cleanup of stale connections
+            cleanup_result = self.connection_manager.cleanup_stale_connections()
+            return {
+                'success': True,
+                'result': cleanup_result
+            }
+
+        elif function_name == 'metrics':
+            # Combined metrics dashboard
+            current_time = time.time()
+            uptime = current_time - self.stats['start_time']
+
+            # Get resource status
+            resource_status = self.resource_manager.check_resource_limits()
+
+            # Get performance summary
+            performance_report = self.performance_monitor.get_performance_report()
+
+            # Get security metrics
+            security_metrics = self.security_logger.get_security_metrics()
+
+            # Get connection summary
+            connection_status = self.connection_manager.get_connection_status()
+
+            return {
+                'success': True,
+                'result': {
+                    'timestamp': datetime.now().isoformat(),
+                    'daemon_info': {
+                        'version': __version__,
+                        'uptime_seconds': uptime,
+                        'uptime_formatted': f"{int(uptime//3600)}h {int((uptime%3600)//60)}m {int(uptime%60)}s"
+                    },
+                    'resource_status': resource_status,
+                    'performance_metrics': performance_report['performance_metrics'],
+                    'security_summary': {
+                        'total_security_events': security_metrics['total_events'],
+                        'validation_failures': self.stats.get('validation_failures', 0),
+                        'requests_rejected': self.stats.get('requests_rejected', 0)
+                    },
+                    'connection_summary': {
+                        'total_connections': connection_status['total_connections'],
+                        'active_connections': connection_status['active_connections'],
+                        'stale_connections': connection_status['stale_connections']
+                    },
+                    'module_status': {
+                        'loaded_modules': len(self.helper_modules),
+                        'available_modules': list(self.helper_modules.keys())
+                    },
+                    'system_stats': self.stats.copy()
+                }
+            }
+
+        elif function_name == 'stats':
+            # Enhanced stats with all monitoring data
+            return {
+                'success': True,
+                'result': {
+                    **self.stats.copy(),
+                    'security_metrics': self.security_logger.get_security_metrics(),
+                    'performance_summary': self.performance_monitor.get_performance_report()['performance_metrics'],
+                    'resource_status': self.resource_manager.check_resource_limits(),
+                    'validation_config': {
+                        'strict_mode': ENABLE_STRICT_VALIDATION,
+                        'max_string_length': MAX_STRING_LENGTH,
+                        'max_array_length': MAX_ARRAY_LENGTH,
+                        'max_object_depth': MAX_OBJECT_DEPTH,
+                        'max_param_count': MAX_PARAM_COUNT
+                    }
+                }
+            }
+
         else:
             raise ValueError(f"Unknown system function: {function_name}")
 
     def _handle_client(self, client_socket, client_address):
         """Handle individual client request"""
         connection_id = f"{client_address}_{threading.get_ident()}_{time.time()}"
-        start_time = datetime.now()
+        start_time = time.time()
 
         # Track connection
         with self.connection_lock:
@@ -972,7 +1481,7 @@ class CPANBridgeDaemon:
                     # Update connection activity
                     with self.connection_lock:
                         if connection_id in self.active_connections:
-                            self.active_connections[connection_id].last_activity = datetime.now()
+                            self.active_connections[connection_id].last_activity = time.time()
                             self.active_connections[connection_id].bytes_received += len(chunk)
 
                     # Try to parse JSON to see if we have complete message
@@ -1011,7 +1520,21 @@ class CPANBridgeDaemon:
 
             # Use sanitized request for processing
             sanitized_request = validation_result.sanitized_request or request
+
+            # Track performance
+            start_time = time.time()
             response = self._route_request(sanitized_request)
+            duration = time.time() - start_time
+
+            # Record performance metrics
+            module_name = sanitized_request.get('module', 'unknown')
+            function_name = sanitized_request.get('function', 'unknown')
+            success = response.get('success', False)
+            error_msg = response.get('error', '') if not success else None
+
+            self.performance_monitor.record_request(
+                module_name, function_name, duration, success, error_msg
+            )
 
             # Update statistics
             self.stats['requests_processed'] += 1
