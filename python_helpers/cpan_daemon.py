@@ -25,7 +25,10 @@ import importlib
 import logging
 import psutil
 import resource
-from typing import Dict, Any, Optional
+import re
+import uuid
+import hashlib
+from typing import Dict, Any, Optional, List, Union
 from pathlib import Path
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -52,6 +55,13 @@ MAX_CONCURRENT_REQUESTS = int(os.environ.get('CPAN_BRIDGE_MAX_CONCURRENT_REQUEST
 STALE_CONNECTION_TIMEOUT = int(os.environ.get('CPAN_BRIDGE_STALE_TIMEOUT', '300'))  # 5 minutes
 RESOURCE_CHECK_INTERVAL = int(os.environ.get('CPAN_BRIDGE_RESOURCE_CHECK_INTERVAL', '60'))  # 1 minute
 
+# Enhanced validation configuration
+MAX_STRING_LENGTH = int(os.environ.get('CPAN_BRIDGE_MAX_STRING_LENGTH', '10000'))  # 10KB strings
+MAX_ARRAY_LENGTH = int(os.environ.get('CPAN_BRIDGE_MAX_ARRAY_LENGTH', '1000'))  # 1000 items
+MAX_OBJECT_DEPTH = int(os.environ.get('CPAN_BRIDGE_MAX_OBJECT_DEPTH', '10'))  # 10 levels deep
+MAX_PARAM_COUNT = int(os.environ.get('CPAN_BRIDGE_MAX_PARAM_COUNT', '100'))  # 100 parameters
+ENABLE_STRICT_VALIDATION = os.environ.get('CPAN_BRIDGE_STRICT_VALIDATION', '1') == '1'
+
 # Set up logging
 logging.basicConfig(
     level=logging.DEBUG if DEBUG_LEVEL > 0 else logging.INFO,
@@ -62,6 +72,16 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger('CPANDaemon')
+
+# Security logging setup
+security_logger = logging.getLogger('CPANSecurity')
+security_handler = logging.FileHandler('/tmp/cpan_security.log', mode='a')
+security_formatter = logging.Formatter(
+    '%(asctime)s [SECURITY] %(levelname)s: %(message)s'
+)
+security_handler.setFormatter(security_formatter)
+security_logger.addHandler(security_handler)
+security_logger.setLevel(logging.INFO)
 
 
 @dataclass
@@ -88,6 +108,450 @@ class ResourceMetrics:
     requests_per_minute: int = 0
     total_requests: int = 0
     failed_requests: int = 0
+
+
+@dataclass
+class SecurityEvent:
+    """Security event for logging and monitoring"""
+    event_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    timestamp: datetime = field(default_factory=datetime.now)
+    event_type: str = ''
+    severity: str = 'info'  # info, warning, error, critical
+    client_info: str = ''
+    request_id: str = ''
+    module: str = ''
+    function: str = ''
+    details: Dict[str, Any] = field(default_factory=dict)
+    remediation: str = ''
+
+
+@dataclass
+class ValidationResult:
+    """Result of request validation"""
+    is_valid: bool = True
+    errors: List[str] = field(default_factory=list)
+    warnings: List[str] = field(default_factory=list)
+    sanitized_request: Optional[Dict[str, Any]] = None
+    security_events: List[SecurityEvent] = field(default_factory=list)
+
+
+class RequestValidator:
+    """Enhanced request validation with JSON schema and security checks"""
+
+    def __init__(self):
+        self.request_schemas = self._define_schemas()
+        self.module_whitelist = self._load_module_whitelist()
+        self.security_patterns = self._load_security_patterns()
+
+    def _define_schemas(self) -> Dict[str, Dict[str, Any]]:
+        """Define JSON schemas for different request types"""
+        base_schema = {
+            "type": "object",
+            "required": ["module", "function"],
+            "properties": {
+                "module": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+                    "maxLength": 50
+                },
+                "function": {
+                    "type": "string",
+                    "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$",
+                    "maxLength": 100
+                },
+                "params": {
+                    "type": ["object", "array", "string", "number", "boolean", "null"]
+                },
+                "timestamp": {
+                    "type": "number"
+                },
+                "request_id": {
+                    "type": "string",
+                    "maxLength": 100
+                },
+                "perl_caller": {
+                    "type": "string",
+                    "maxLength": 200
+                },
+                "client_version": {
+                    "type": "string",
+                    "maxLength": 50
+                }
+            },
+            "additionalProperties": False
+        }
+
+        return {
+            "default": base_schema,
+            "system": {
+                **base_schema,
+                "properties": {
+                    **base_schema["properties"],
+                    "module": {
+                        "type": "string",
+                        "enum": ["system", "test"]
+                    }
+                }
+            }
+        }
+
+    def _load_module_whitelist(self) -> Dict[str, List[str]]:
+        """Load allowed modules and their functions"""
+        return {
+            # Core helper modules
+            "database": ["connect", "disconnect", "execute_statement", "fetch_row", "fetch_all",
+                        "prepare", "finish_statement", "begin_transaction", "commit", "rollback"],
+            "xml_helper": ["xml_in", "xml_out", "escape_xml", "unescape_xml"],
+            "xpath": ["new", "find", "findnodes", "findvalue", "exists"],
+            "http": ["lwp_request", "get", "post", "put", "delete", "head"],
+            "datetime_helper": ["format_date", "parse_date", "add_days", "diff_days", "now"],
+            "crypto": ["encrypt", "decrypt", "hash", "generate_key", "sign", "verify"],
+            "email_helper": ["send_email", "send_html_email", "validate_email"],
+            "logging_helper": ["log_message", "log_error", "log_warning", "log_debug"],
+            "excel": ["create_workbook", "add_worksheet", "write_cell", "save_workbook"],
+            "sftp": ["connect", "put", "get", "delete", "list_files", "disconnect"],
+            # Administrative modules
+            "test": ["ping", "health", "stats", "echo"],
+            "system": ["info", "shutdown", "health", "stats"]
+        }
+
+    def _load_security_patterns(self) -> Dict[str, List[str]]:
+        """Load security threat patterns"""
+        return {
+            "injection_patterns": [
+                r"[\x00-\x1f\x7f-\x9f]",  # Control characters
+                r"<script[^>]*>",  # Script tags
+                r"javascript:",  # JavaScript protocol
+                r"on\w+\s*=",  # Event handlers
+                r"\$\{.*\}",  # Variable interpolation
+                r"\#\{.*\}",  # Ruby interpolation
+                r"\.\./",  # Path traversal
+                r"\\\\.*\\\\"  # UNC paths
+            ],
+            "dangerous_functions": [
+                "eval", "exec", "compile", "__import__", "open", "file",
+                "subprocess", "os", "sys", "globals", "locals", "vars",
+                "input", "raw_input", "execfile", "reload"
+            ],
+            "suspicious_strings": [
+                "DROP TABLE", "DELETE FROM", "UPDATE SET", "INSERT INTO",
+                "UNION SELECT", "OR 1=1", "AND 1=1", "' OR '", '" OR "',
+                "--", "/*", "*/", "xp_", "sp_", "ALTER TABLE"
+            ]
+        }
+
+    def validate_request(self, request: Dict[str, Any], client_info: str = "") -> ValidationResult:
+        """Comprehensive request validation with security checks"""
+        result = ValidationResult()
+        request_id = request.get('request_id', str(uuid.uuid4()))
+
+        try:
+            # Step 1: Basic structure validation
+            self._validate_structure(request, result)
+
+            # Step 2: Schema validation
+            if result.is_valid:
+                self._validate_schema(request, result)
+
+            # Step 3: Security validation
+            if result.is_valid:
+                self._validate_security(request, result, client_info, request_id)
+
+            # Step 4: Parameter sanitization and validation
+            if result.is_valid:
+                result.sanitized_request = self._sanitize_request(request, result)
+
+            # Step 5: Module/function whitelist validation
+            if result.is_valid:
+                self._validate_whitelist(request, result, client_info, request_id)
+
+        except Exception as e:
+            result.is_valid = False
+            result.errors.append(f"Validation error: {str(e)}")
+            result.security_events.append(SecurityEvent(
+                event_type="validation_exception",
+                severity="error",
+                client_info=client_info,
+                request_id=request_id,
+                details={"error": str(e), "request": self._safe_request_repr(request)}
+            ))
+
+        return result
+
+    def _validate_structure(self, request: Dict[str, Any], result: ValidationResult) -> None:
+        """Validate basic request structure"""
+        if not isinstance(request, dict):
+            result.is_valid = False
+            result.errors.append("Request must be a JSON object")
+            return
+
+        required_fields = ['module', 'function']
+        for field in required_fields:
+            if field not in request:
+                result.is_valid = False
+                result.errors.append(f"Missing required field: {field}")
+
+        # Check for excessive parameters
+        if len(request) > MAX_PARAM_COUNT:
+            result.is_valid = False
+            result.errors.append(f"Too many parameters: {len(request)} (max: {MAX_PARAM_COUNT})")
+
+    def _validate_schema(self, request: Dict[str, Any], result: ValidationResult) -> None:
+        """Validate request against JSON schema"""
+        module_name = request.get('module', '')
+        schema_key = 'system' if module_name in ['system', 'test'] else 'default'
+        schema = self.request_schemas[schema_key]
+
+        # Simple schema validation (would use jsonschema library in production)
+        self._validate_against_schema(request, schema, result)
+
+    def _validate_against_schema(self, data: Any, schema: Dict[str, Any], result: ValidationResult, path: str = "") -> None:
+        """Simple JSON schema validation implementation"""
+        if schema.get("type") == "object":
+            if not isinstance(data, dict):
+                result.is_valid = False
+                result.errors.append(f"Expected object at {path or 'root'}")
+                return
+
+            # Check required properties
+            for prop in schema.get("required", []):
+                if prop not in data:
+                    result.is_valid = False
+                    result.errors.append(f"Missing required property: {prop}")
+
+            # Validate properties
+            for prop, value in data.items():
+                if "properties" in schema and prop in schema["properties"]:
+                    self._validate_against_schema(value, schema["properties"][prop], result, f"{path}.{prop}")
+                elif not schema.get("additionalProperties", True):
+                    result.is_valid = False
+                    result.errors.append(f"Additional property not allowed: {prop}")
+
+        elif schema.get("type") == "string":
+            if not isinstance(data, str):
+                result.is_valid = False
+                result.errors.append(f"Expected string at {path}")
+                return
+
+            if "maxLength" in schema and len(data) > schema["maxLength"]:
+                result.is_valid = False
+                result.errors.append(f"String too long at {path}: {len(data)} > {schema['maxLength']}")
+
+            if "pattern" in schema and not re.match(schema["pattern"], data):
+                result.is_valid = False
+                result.errors.append(f"String pattern mismatch at {path}")
+
+            if "enum" in schema and data not in schema["enum"]:
+                result.is_valid = False
+                result.errors.append(f"Value not in allowed enum at {path}: {data}")
+
+    def _validate_security(self, request: Dict[str, Any], result: ValidationResult,
+                          client_info: str, request_id: str) -> None:
+        """Comprehensive security validation"""
+        module_name = request.get('module', '')
+        function_name = request.get('function', '')
+
+        # Check for injection patterns
+        request_str = json.dumps(request)
+        for pattern in self.security_patterns["injection_patterns"]:
+            if re.search(pattern, request_str, re.IGNORECASE):
+                result.is_valid = False
+                result.errors.append("Potential injection attack detected")
+                result.security_events.append(SecurityEvent(
+                    event_type="injection_attempt",
+                    severity="critical",
+                    client_info=client_info,
+                    request_id=request_id,
+                    module=module_name,
+                    function=function_name,
+                    details={"pattern": pattern, "request": self._safe_request_repr(request)}
+                ))
+                break
+
+        # Check for dangerous function names
+        for dangerous in self.security_patterns["dangerous_functions"]:
+            if dangerous in function_name.lower() or dangerous in module_name.lower():
+                result.is_valid = False
+                result.errors.append(f"Dangerous function/module name detected: {dangerous}")
+                result.security_events.append(SecurityEvent(
+                    event_type="dangerous_function",
+                    severity="error",
+                    client_info=client_info,
+                    request_id=request_id,
+                    module=module_name,
+                    function=function_name,
+                    details={"dangerous_pattern": dangerous}
+                ))
+
+        # Check for SQL injection patterns
+        for pattern in self.security_patterns["suspicious_strings"]:
+            if pattern.lower() in request_str.lower():
+                result.warnings.append(f"Suspicious string pattern detected: {pattern}")
+                result.security_events.append(SecurityEvent(
+                    event_type="suspicious_content",
+                    severity="warning",
+                    client_info=client_info,
+                    request_id=request_id,
+                    module=module_name,
+                    function=function_name,
+                    details={"pattern": pattern}
+                ))
+
+    def _sanitize_request(self, request: Dict[str, Any], result: ValidationResult) -> Dict[str, Any]:
+        """Sanitize and normalize request parameters"""
+        sanitized = {}
+
+        for key, value in request.items():
+            sanitized[key] = self._sanitize_value(value, result, key)
+
+        return sanitized
+
+    def _sanitize_value(self, value: Any, result: ValidationResult, path: str) -> Any:
+        """Sanitize individual values"""
+        if isinstance(value, str):
+            # Length check
+            if len(value) > MAX_STRING_LENGTH:
+                result.warnings.append(f"String truncated at {path}: {len(value)} > {MAX_STRING_LENGTH}")
+                value = value[:MAX_STRING_LENGTH]
+
+            # Remove control characters
+            value = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', value)
+
+            return value
+
+        elif isinstance(value, dict):
+            return {k: self._sanitize_value(v, result, f"{path}.{k}") for k, v in value.items()}
+
+        elif isinstance(value, list):
+            if len(value) > MAX_ARRAY_LENGTH:
+                result.warnings.append(f"Array truncated at {path}: {len(value)} > {MAX_ARRAY_LENGTH}")
+                value = value[:MAX_ARRAY_LENGTH]
+
+            return [self._sanitize_value(item, result, f"{path}[{i}]") for i, item in enumerate(value)]
+
+        return value
+
+    def _validate_whitelist(self, request: Dict[str, Any], result: ValidationResult,
+                           client_info: str, request_id: str) -> None:
+        """Validate against module/function whitelist"""
+        module_name = request.get('module', '')
+        function_name = request.get('function', '')
+
+        if module_name not in self.module_whitelist:
+            result.is_valid = False
+            result.errors.append(f"Module not allowed: {module_name}")
+            result.security_events.append(SecurityEvent(
+                event_type="unauthorized_module",
+                severity="error",
+                client_info=client_info,
+                request_id=request_id,
+                module=module_name,
+                function=function_name,
+                details={"attempted_module": module_name}
+            ))
+            return
+
+        allowed_functions = self.module_whitelist[module_name]
+        if function_name not in allowed_functions:
+            result.is_valid = False
+            result.errors.append(f"Function not allowed: {module_name}.{function_name}")
+            result.security_events.append(SecurityEvent(
+                event_type="unauthorized_function",
+                severity="error",
+                client_info=client_info,
+                request_id=request_id,
+                module=module_name,
+                function=function_name,
+                details={"attempted_function": function_name, "allowed_functions": allowed_functions}
+            ))
+
+    def _safe_request_repr(self, request: Dict[str, Any]) -> Dict[str, Any]:
+        """Create safe representation of request for logging"""
+        safe_request = {}
+        for key, value in request.items():
+            if key.lower() in ['password', 'secret', 'token', 'key']:
+                safe_request[key] = "[REDACTED]"
+            elif isinstance(value, str) and len(value) > 100:
+                safe_request[key] = value[:97] + "..."
+            else:
+                safe_request[key] = value
+        return safe_request
+
+
+class SecurityLogger:
+    """Enhanced security logging and monitoring"""
+
+    def __init__(self):
+        self.security_events = []
+        self.security_metrics = defaultdict(int)
+        self.alert_thresholds = {
+            "injection_attempt": 5,  # per hour
+            "unauthorized_access": 10,  # per hour
+            "validation_failure": 50,  # per hour
+        }
+
+    def log_security_event(self, event: SecurityEvent) -> None:
+        """Log security event with structured format"""
+        # Log to security log file
+        log_data = {
+            "event_id": event.event_id,
+            "timestamp": event.timestamp.isoformat(),
+            "event_type": event.event_type,
+            "severity": event.severity,
+            "client_info": event.client_info,
+            "request_id": event.request_id,
+            "module": event.module,
+            "function": event.function,
+            "details": event.details
+        }
+
+        security_logger.info(json.dumps(log_data))
+
+        # Update metrics
+        self.security_metrics[event.event_type] += 1
+        self.security_metrics[f"{event.event_type}_{event.severity}"] += 1
+
+        # Store for analysis
+        self.security_events.append(event)
+
+        # Clean old events (keep last 1000)
+        if len(self.security_events) > 1000:
+            self.security_events = self.security_events[-1000:]
+
+        # Check alert thresholds
+        self._check_alert_thresholds(event)
+
+    def _check_alert_thresholds(self, event: SecurityEvent) -> None:
+        """Check if security event triggers alerts"""
+        if event.event_type in self.alert_thresholds:
+            threshold = self.alert_thresholds[event.event_type]
+            recent_events = [
+                e for e in self.security_events
+                if e.event_type == event.event_type
+                and (datetime.now() - e.timestamp).total_seconds() < 3600  # Last hour
+            ]
+
+            if len(recent_events) >= threshold:
+                security_logger.critical(
+                    f"SECURITY ALERT: {event.event_type} threshold exceeded: "
+                    f"{len(recent_events)} events in last hour (threshold: {threshold})"
+                )
+
+    def get_security_metrics(self) -> Dict[str, Any]:
+        """Get current security metrics"""
+        return {
+            "total_events": len(self.security_events),
+            "events_by_type": dict(self.security_metrics),
+            "recent_events": [
+                {
+                    "event_type": e.event_type,
+                    "severity": e.severity,
+                    "timestamp": e.timestamp.isoformat(),
+                    "client_info": e.client_info
+                }
+                for e in self.security_events[-10:]  # Last 10 events
+            ]
+        }
 
 
 class ResourceManager:
@@ -192,6 +656,8 @@ class CPANBridgeDaemon:
             'requests_processed': 0,
             'requests_failed': 0,
             'requests_rejected': 0,
+            'validation_failures': 0,
+            'security_events': 0,
             'start_time': time.time(),
             'last_cleanup': time.time(),
             'last_resource_check': time.time(),
@@ -203,6 +669,10 @@ class CPANBridgeDaemon:
         # Resource management
         self.resource_manager = ResourceManager()
         self.connection_lock = threading.Lock()
+
+        # Enhanced validation and security
+        self.validator = RequestValidator()
+        self.security_logger = SecurityLogger()
 
         # Thread management
         self.threads = []
@@ -219,6 +689,10 @@ class CPANBridgeDaemon:
                    f"Requests/min: {MAX_REQUESTS_PER_MINUTE}, Concurrent: {MAX_CONCURRENT_REQUESTS}")
         logger.info(f"Resource monitoring - Stale timeout: {STALE_CONNECTION_TIMEOUT}s, "
                    f"Check interval: {RESOURCE_CHECK_INTERVAL}s")
+        logger.info(f"Validation limits - String: {MAX_STRING_LENGTH}, Array: {MAX_ARRAY_LENGTH}, "
+                   f"Depth: {MAX_OBJECT_DEPTH}, Params: {MAX_PARAM_COUNT}")
+        logger.info(f"Security features - Strict validation: {ENABLE_STRICT_VALIDATION}, "
+                   f"Security logging: enabled")
 
     def _signal_handler(self, signum, frame):
         """Handle shutdown signals gracefully"""
@@ -276,49 +750,39 @@ class CPANBridgeDaemon:
         logger.info(f"Successfully loaded {len(modules)} helper modules: {list(modules.keys())}")
         return modules
 
-    def _validate_request(self, request: Dict[str, Any]) -> bool:
-        """Validate incoming request structure and security"""
-        required_fields = ['module', 'function']
+    def _validate_request(self, request: Dict[str, Any], client_info: str = "") -> ValidationResult:
+        """Enhanced request validation with comprehensive security checks"""
+        # Generate or extract request ID for tracking
+        request_id = request.get('request_id', str(uuid.uuid4()))
+        request['request_id'] = request_id
 
-        for field in required_fields:
-            if field not in request:
-                raise ValueError(f"Missing required field: {field}")
+        # Perform comprehensive validation
+        validation_result = self.validator.validate_request(request, client_info)
 
-        module_name = request['module']
-        function_name = request['function']
+        # Log all security events
+        for event in validation_result.security_events:
+            self.security_logger.log_security_event(event)
+            self.stats['security_events'] += 1
 
-        # Allow system module for administrative functions
-        if module_name == 'system':
-            allowed_system_functions = ['info', 'shutdown', 'health', 'stats']
-            if function_name not in allowed_system_functions:
-                raise ValueError(f"System function '{function_name}' not allowed")
-            return True  # Skip other validation for system module
+        # Update statistics
+        if not validation_result.is_valid:
+            self.stats['validation_failures'] += 1
+            self.stats['requests_rejected'] += 1
 
-        # Basic security check - prevent dangerous function names
-        dangerous_patterns = ['__', 'eval', 'import', 'subprocess']
-        dangerous_exact = ['exec', 'open', 'file']
-        function_lower = function_name.lower()
-        module_lower = module_name.lower()
+            # Log validation failure
+            security_logger.warning(
+                f"Request validation failed - Request ID: {request_id}, "
+                f"Client: {client_info}, Errors: {validation_result.errors}"
+            )
 
-        # Check substring patterns
-        for pattern in dangerous_patterns:
-            if pattern in function_lower or pattern in module_lower:
-                raise ValueError(f"Potentially dangerous function/module name: {module_name}.{function_name}")
+        # Log warnings even for valid requests
+        if validation_result.warnings:
+            security_logger.info(
+                f"Request validation warnings - Request ID: {request_id}, "
+                f"Client: {client_info}, Warnings: {validation_result.warnings}"
+            )
 
-        # Check exact matches
-        for pattern in dangerous_exact:
-            if function_lower == pattern or module_lower == pattern:
-                raise ValueError(f"Potentially dangerous function/module name: {module_name}.{function_name}")
-
-        # Validate module name format
-        if not request['module'].replace('_', '').isalnum():
-            raise ValueError(f"Invalid module name format: {request['module']}")
-
-        # Validate function name format
-        if not request['function'].replace('_', '').isalnum():
-            raise ValueError(f"Invalid function name format: {request['function']}")
-
-        return True
+        return validation_result
 
     def _route_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Route request to appropriate helper module"""
@@ -404,16 +868,19 @@ class CPANBridgeDaemon:
                 }
             }
 
-        elif function_name == 'health':
+        elif function_name == 'stats':
             return {
                 'success': True,
                 'result': {
-                    'status': 'healthy',
-                    'daemon_version': __version__,
-                    'uptime': time.time() - self.stats['start_time'],
-                    'active_connections': len(self.active_connections),
-                    'loaded_modules': list(self.helper_modules.keys()),
-                    'stats': self.stats.copy()
+                    **self.stats.copy(),
+                    'security_metrics': self.security_logger.get_security_metrics(),
+                    'validation_config': {
+                        'strict_mode': ENABLE_STRICT_VALIDATION,
+                        'max_string_length': MAX_STRING_LENGTH,
+                        'max_array_length': MAX_ARRAY_LENGTH,
+                        'max_object_depth': MAX_OBJECT_DEPTH,
+                        'max_param_count': MAX_PARAM_COUNT
+                    }
                 }
             }
 
@@ -536,9 +1003,15 @@ class CPANBridgeDaemon:
                 if connection_id in self.active_connections:
                     self.active_connections[connection_id].requests_count += 1
 
-            # Validate and route request
-            self._validate_request(request)
-            response = self._route_request(request)
+            # Enhanced validation with security logging
+            validation_result = self._validate_request(request, str(client_address))
+
+            if not validation_result.is_valid:
+                raise ValueError(f"Request validation failed: {'; '.join(validation_result.errors)}")
+
+            # Use sanitized request for processing
+            sanitized_request = validation_result.sanitized_request or request
+            response = self._route_request(sanitized_request)
 
             # Update statistics
             self.stats['requests_processed'] += 1
