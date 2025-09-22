@@ -27,6 +27,7 @@ import psutil
 import re
 import uuid
 import hashlib
+import tempfile
 
 # Import resource module with Windows compatibility
 try:
@@ -76,20 +77,25 @@ MAX_OBJECT_DEPTH = int(os.environ.get('CPAN_BRIDGE_MAX_OBJECT_DEPTH', '10'))  # 
 MAX_PARAM_COUNT = int(os.environ.get('CPAN_BRIDGE_MAX_PARAM_COUNT', '100'))  # 100 parameters
 ENABLE_STRICT_VALIDATION = os.environ.get('CPAN_BRIDGE_STRICT_VALIDATION', '1') == '1'
 
+# Cross-platform log file paths
+temp_dir = tempfile.gettempdir()
+daemon_log_path = os.path.join(temp_dir, 'cpan_daemon.log')
+security_log_path = os.path.join(temp_dir, 'cpan_security.log')
+
 # Set up logging
 logging.basicConfig(
     level=logging.DEBUG if DEBUG_LEVEL > 0 else logging.INFO,
     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
     handlers=[
         logging.StreamHandler(sys.stderr),
-        logging.FileHandler('/tmp/cpan_daemon.log', mode='a')
+        logging.FileHandler(daemon_log_path, mode='a')
     ]
 )
 logger = logging.getLogger('CPANDaemon')
 
 # Security logging setup
 security_logger = logging.getLogger('CPANSecurity')
-security_handler = logging.FileHandler('/tmp/cpan_security.log', mode='a')
+security_handler = logging.FileHandler(security_log_path, mode='a')
 security_formatter = logging.Formatter(
     '%(asctime)s [SECURITY] %(levelname)s: %(message)s'
 )
