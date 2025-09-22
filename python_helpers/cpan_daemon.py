@@ -24,10 +24,18 @@ import traceback
 import importlib
 import logging
 import psutil
-import resource
 import re
 import uuid
 import hashlib
+
+# Import resource module with Windows compatibility
+try:
+    import resource
+    HAS_RESOURCE = True
+except ImportError:
+    # Windows doesn't have resource module
+    HAS_RESOURCE = False
+    resource = None
 from typing import Dict, Any, Optional, List, Union
 from pathlib import Path
 from collections import defaultdict
@@ -40,7 +48,13 @@ DAEMON_VERSION = "1.0.0"
 MIN_CLIENT_VERSION = "1.0.0"
 
 # Configuration from environment
-SOCKET_PATH = os.environ.get('CPAN_BRIDGE_SOCKET', '/tmp/cpan_bridge.sock')
+# Platform-specific socket path
+if os.name == 'nt':  # Windows
+    DEFAULT_SOCKET = r'\\.\pipe\cpan_bridge'
+else:  # Unix-like systems
+    DEFAULT_SOCKET = '/tmp/cpan_bridge.sock'
+
+SOCKET_PATH = os.environ.get('CPAN_BRIDGE_SOCKET', DEFAULT_SOCKET)
 DEBUG_LEVEL = int(os.environ.get('CPAN_BRIDGE_DEBUG', '0'))
 MAX_CONNECTIONS = int(os.environ.get('CPAN_BRIDGE_MAX_CONNECTIONS', '100'))
 MAX_REQUEST_SIZE = int(os.environ.get('CPAN_BRIDGE_MAX_REQUEST_SIZE', '10485760'))  # 10MB
@@ -854,19 +868,36 @@ class HealthChecker:
         checks = health_status['checks']
 
         try:
-            # Check if socket file exists and is accessible
-            socket_path = SOCKET_PATH
-            if os.path.exists(socket_path):
-                checks['socket_connectivity'] = {
-                    'status': 'pass',
-                    'message': 'Socket file exists and accessible',
-                    'details': {'socket_path': socket_path}
-                }
+            # Check socket connectivity (platform-specific)
+            socket_path = getattr(self, 'actual_socket_path', SOCKET_PATH)
+            if os.name == 'nt':
+                # For Windows TCP socket, check if server is listening
+                if hasattr(self, 'server_socket') and self.server_socket:
+                    checks['socket_connectivity'] = {
+                        'status': 'pass',
+                        'message': 'TCP socket is listening',
+                        'details': {'socket_path': socket_path}
+                    }
+                else:
+                    checks['socket_connectivity'] = {
+                        'status': 'fail',
+                        'message': 'TCP socket not available',
+                        'details': {'socket_path': socket_path}
+                    }
             else:
-                checks['socket_connectivity'] = {
-                    'status': 'fail',
-                    'message': 'Socket file not found'
-                }
+                # For Unix domain socket, check if file exists
+                if os.path.exists(SOCKET_PATH):
+                    checks['socket_connectivity'] = {
+                        'status': 'pass',
+                        'message': 'Socket file exists and accessible',
+                        'details': {'socket_path': socket_path}
+                    }
+                else:
+                    checks['socket_connectivity'] = {
+                        'status': 'fail',
+                        'message': 'Socket file not found',
+                        'details': {'socket_path': socket_path}
+                    }
                 health_status['errors'].append("Socket file not accessible")
 
         except Exception as e:
@@ -1314,7 +1345,7 @@ class CPANBridgeDaemon:
                     'python_executable': sys.executable,
                     'platform': sys.platform,
                     'working_directory': os.getcwd(),
-                    'socket_path': SOCKET_PATH,
+                    'socket_path': getattr(self, 'actual_socket_path', SOCKET_PATH),
                     'uptime': time.time() - self.stats['start_time'],
                     'loaded_modules': list(self.helper_modules.keys()),
                     'active_connections': len(self.active_connections),
@@ -1701,21 +1732,40 @@ class CPANBridgeDaemon:
 
     def _create_socket(self):
         """Create and configure Unix domain socket"""
-        # Remove existing socket file
-        if os.path.exists(SOCKET_PATH):
-            os.unlink(SOCKET_PATH)
+        # Platform-specific socket creation
+        if os.name == 'nt':  # Windows - use TCP localhost socket
+            # For Windows, use localhost TCP socket instead of Unix domain socket
+            self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            # Use a high port number to avoid conflicts
+            self.server_socket.bind(('127.0.0.1', 0))  # Let system choose available port
+            self.actual_socket_path = f"127.0.0.1:{self.server_socket.getsockname()[1]}"
+        else:  # Unix-like systems
+            # Remove existing socket file
+            if os.path.exists(SOCKET_PATH):
+                os.unlink(SOCKET_PATH)
 
-        # Create socket
-        self.server_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.server_socket.bind(SOCKET_PATH)
+            # Create Unix domain socket
+            self.server_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            self.server_socket.bind(SOCKET_PATH)
+            self.actual_socket_path = SOCKET_PATH
 
-        # Set restrictive permissions (owner only)
-        os.chmod(SOCKET_PATH, 0o600)
+            # Set restrictive permissions (owner only)
+            os.chmod(SOCKET_PATH, 0o600)
 
         # Start listening
         self.server_socket.listen(MAX_CONNECTIONS)
 
-        logger.info(f"Unix domain socket created at {SOCKET_PATH}")
+        if os.name == 'nt':
+            logger.info(f"TCP socket created at {self.actual_socket_path}")
+            # Save socket info for Windows Perl clients
+            try:
+                with open('cpan_bridge_socket.txt', 'w') as f:
+                    f.write(self.actual_socket_path)
+            except Exception as e:
+                logger.warning(f"Could not save socket info file: {e}")
+        else:
+            logger.info(f"Unix domain socket created at {self.actual_socket_path}")
 
     def start_server(self):
         """Start the daemon server"""
@@ -1742,7 +1792,7 @@ class CPANBridgeDaemon:
             self.resource_thread.start()
 
             logger.info(f"CPAN Bridge Daemon v{__version__} started successfully")
-            logger.info(f"Listening on {SOCKET_PATH}")
+            logger.info(f"Listening on {self.actual_socket_path}")
             logger.info(f"Loaded modules: {list(self.helper_modules.keys())}")
 
             # Main server loop
@@ -1813,8 +1863,9 @@ class CPANBridgeDaemon:
                 thread.join(timeout=5.0)
 
         # Cleanup socket file
+        # Cleanup socket file (Unix only)
         try:
-            if os.path.exists(SOCKET_PATH):
+            if os.name != 'nt' and os.path.exists(SOCKET_PATH):
                 os.unlink(SOCKET_PATH)
                 logger.info(f"Removed socket file: {SOCKET_PATH}")
         except:

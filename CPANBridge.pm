@@ -8,6 +8,7 @@ use Carp;
 use FindBin;
 use File::Spec;
 use IO::Socket::UNIX;
+use IO::Socket::INET;
 use Time::HiRes qw(time sleep);
 
 our $VERSION = '2.00';
@@ -737,12 +738,41 @@ sub _send_daemon_request {
     my ($self, $request) = @_;
 
     eval {
-        # Connect to daemon
-        my $socket = IO::Socket::UNIX->new(
-            Peer => $DAEMON_SOCKET,
-            Type => SOCK_STREAM,
-            Timeout => $DAEMON_TIMEOUT
-        );
+        my $socket;
+
+        # Platform-specific socket connection
+        if ($^O eq 'MSWin32') {
+            # Windows: Try to read socket info from file
+            my $socket_info_file = 'cpan_bridge_socket.txt';
+            my $socket_path = $DAEMON_SOCKET;
+
+            if (-f $socket_info_file) {
+                open my $fh, '<', $socket_info_file or die "Cannot read socket info: $!";
+                $socket_path = <$fh>;
+                chomp $socket_path;
+                close $fh;
+            }
+
+            # Parse TCP socket info (host:port)
+            if ($socket_path =~ /^(.+):(\d+)$/) {
+                my ($host, $port) = ($1, $2);
+                $socket = IO::Socket::INET->new(
+                    PeerAddr => $host,
+                    PeerPort => $port,
+                    Proto    => 'tcp',
+                    Timeout  => $DAEMON_TIMEOUT
+                );
+            } else {
+                die "Invalid socket format for Windows: $socket_path";
+            }
+        } else {
+            # Unix-like systems: Use Unix domain socket
+            $socket = IO::Socket::UNIX->new(
+                Peer => $DAEMON_SOCKET,
+                Type => SOCK_STREAM,
+                Timeout => $DAEMON_TIMEOUT
+            );
+        }
 
         unless ($socket) {
             return {
