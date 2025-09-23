@@ -899,7 +899,282 @@ print "\n=== XML Helper Module Validation Complete ===\n";
 
 ---
 
-### **BASELINE-007: Quick Validation of All Modules**
+### **BASELINE-007: Crypto Module Validation**
+
+**Epic**: Core Functionality
+**Story Type**: Functional
+**Priority**: High
+
+**Background**:
+The `crypto` module provides cryptographic operations including encryption, decryption, and hashing. It supports multiple algorithms (Blowfish, AES) and handles PEM key files, making it critical for security-sensitive applications.
+
+**Acceptance Criteria**:
+- [ ] Cipher creation succeeds with various algorithms
+- [ ] Encryption/decryption round-trip works correctly
+- [ ] PEM key file processing works
+- [ ] Hash functions generate correct outputs
+- [ ] Different key formats are handled (string, hex, base64)
+- [ ] Error conditions are handled properly
+- [ ] Both process and daemon modes work identically
+
+**Test Script**:
+```perl
+#!/usr/bin/perl
+use strict;
+use warnings;
+use CPANBridge;
+use Digest::SHA qw(sha256_hex);
+
+sub test_crypto_mode {
+    my ($mode_name, $daemon_mode) = @_;
+
+    print "\n=== Testing Crypto Module - $mode_name ===\n";
+
+    $CPANBridge::DAEMON_MODE = $daemon_mode;
+    my $bridge = CPANBridge->new();
+
+    # Test 1: Cipher creation with string key
+    my $result = $bridge->call_python('crypto', 'new', {
+        key => 'MySecretKey123',
+        cipher => 'Blowfish'
+    });
+
+    my $cipher_id;
+    if ($result->{success}) {
+        $cipher_id = $result->{result}->{cipher_id};
+        print "Cipher creation (string key): PASS\n";
+    } else {
+        print "Cipher creation (string key): FAIL - " . $result->{error} . "\n";
+        return 0;
+    }
+
+    # Test 2: Basic encryption/decryption round-trip
+    my $test_plaintext = "Hello, World! This is a test message with special chars: @#$%^&*()";
+
+    $result = $bridge->call_python('crypto', 'encrypt', {
+        cipher_id => $cipher_id,
+        plaintext => $test_plaintext
+    });
+
+    my $encrypted_hex;
+    if ($result->{success}) {
+        $encrypted_hex = $result->{result}->{encrypted};
+        print "Encryption: PASS\n";
+    } else {
+        print "Encryption: FAIL - " . $result->{error} . "\n";
+        return 0;
+    }
+
+    # Test 3: Decryption
+    $result = $bridge->call_python('crypto', 'decrypt', {
+        cipher_id => $cipher_id,
+        hex_ciphertext => $encrypted_hex
+    });
+
+    if ($result->{success}) {
+        my $decrypted_text = $result->{result}->{decrypted};
+        if ($decrypted_text eq $test_plaintext) {
+            print "Decryption round-trip: PASS\n";
+        } else {
+            print "Decryption round-trip: FAIL - text mismatch\n";
+            print "  Expected: $test_plaintext\n";
+            print "  Got:      $decrypted_text\n";
+        }
+    } else {
+        print "Decryption: FAIL - " . $result->{error} . "\n";
+    }
+
+    # Test 4: Unicode handling
+    my $unicode_text = "Unicode test: 世界 🌍 café naïve résumé";
+    $result = $bridge->call_python('crypto', 'encrypt', {
+        cipher_id => $cipher_id,
+        plaintext => $unicode_text
+    });
+
+    if ($result->{success}) {
+        my $unicode_encrypted = $result->{result}->{encrypted};
+
+        # Decrypt it back
+        $result = $bridge->call_python('crypto', 'decrypt', {
+            cipher_id => $cipher_id,
+            hex_ciphertext => $unicode_encrypted
+        });
+
+        if ($result->{success} && $result->{result}->{decrypted} eq $unicode_text) {
+            print "Unicode encryption: PASS\n";
+        } else {
+            print "Unicode encryption: FAIL\n";
+        }
+    } else {
+        print "Unicode encryption: FAIL - " . $result->{error} . "\n";
+    }
+
+    # Test 5: AES cipher
+    $result = $bridge->call_python('crypto', 'new', {
+        key => 'AESTestKey123456',  # 16-byte key for AES
+        cipher => 'AES'
+    });
+
+    if ($result->{success}) {
+        my $aes_cipher_id = $result->{result}->{cipher_id};
+        print "AES cipher creation: PASS\n";
+
+        # Test AES encryption/decryption
+        $result = $bridge->call_python('crypto', 'encrypt', {
+            cipher_id => $aes_cipher_id,
+            plaintext => "AES test message"
+        });
+
+        if ($result->{success}) {
+            my $aes_encrypted = $result->{result}->{encrypted};
+
+            $result = $bridge->call_python('crypto', 'decrypt', {
+                cipher_id => $aes_cipher_id,
+                hex_ciphertext => $aes_encrypted
+            });
+
+            if ($result->{success} && $result->{result}->{decrypted} eq "AES test message") {
+                print "AES round-trip: PASS\n";
+            } else {
+                print "AES round-trip: FAIL\n";
+            }
+        } else {
+            print "AES encryption: FAIL\n";
+        }
+
+        # Cleanup AES cipher
+        $bridge->call_python('crypto', 'cleanup_cipher', { cipher_id => $aes_cipher_id });
+    } else {
+        print "AES cipher creation: FAIL - " . $result->{error} . "\n";
+    }
+
+    # Test 6: Hash function (if available)
+    $result = $bridge->call_python('crypto', 'hash', {
+        data => 'test data for hashing',
+        algorithm => 'SHA256'
+    });
+
+    if ($result->{success}) {
+        my $hash_result = $result->{result}->{hash};
+        # Verify it's a valid SHA256 hex string (64 characters)
+        if ($hash_result && length($hash_result) == 64 && $hash_result =~ /^[0-9a-f]+$/i) {
+            print "Hash function: PASS\n";
+        } else {
+            print "Hash function: FAIL - invalid hash format\n";
+        }
+    } else {
+        print "Hash function: FAIL - " . $result->{error} . "\n";
+    }
+
+    # Test 7: PEM key file handling (create a test key file)
+    my $test_key_file = '/tmp/test_crypto_key.pem';
+    my $pem_key = "-----BEGIN PRIVATE KEY-----\nVGhpc0lzQVRlc3RLZXkxMjNBQkNERUY=\n-----END PRIVATE KEY-----\n";
+
+    open my $fh, '>', $test_key_file;
+    print $fh $pem_key;
+    close $fh;
+
+    $result = $bridge->call_python('crypto', 'new', {
+        key_file => $test_key_file,
+        cipher => 'Blowfish'
+    });
+
+    if ($result->{success}) {
+        print "PEM key file: PASS\n";
+        my $pem_cipher_id = $result->{result}->{cipher_id};
+
+        # Quick test with PEM key
+        $result = $bridge->call_python('crypto', 'encrypt', {
+            cipher_id => $pem_cipher_id,
+            plaintext => "PEM key test"
+        });
+
+        if ($result->{success}) {
+            print "PEM key encryption: PASS\n";
+        } else {
+            print "PEM key encryption: FAIL\n";
+        }
+
+        # Cleanup PEM cipher
+        $bridge->call_python('crypto', 'cleanup_cipher', { cipher_id => $pem_cipher_id });
+    } else {
+        print "PEM key file: FAIL - " . $result->{error} . "\n";
+    }
+
+    # Test 8: Error handling - invalid cipher
+    $result = $bridge->call_python('crypto', 'new', {
+        key => 'test',
+        cipher => 'InvalidCipher'
+    });
+
+    if (!$result->{success}) {
+        print "Invalid cipher handling: PASS\n";
+    } else {
+        print "Invalid cipher handling: FAIL - should have failed\n";
+    }
+
+    # Test 9: Error handling - invalid hex for decryption
+    $result = $bridge->call_python('crypto', 'decrypt', {
+        cipher_id => $cipher_id,
+        hex_ciphertext => 'invalid_hex_string'
+    });
+
+    if (!$result->{success}) {
+        print "Invalid hex handling: PASS\n";
+    } else {
+        print "Invalid hex handling: FAIL - should have failed\n";
+    }
+
+    # Test 10: Large data encryption
+    my $large_data = "A" x 10000;  # 10KB of data
+    $result = $bridge->call_python('crypto', 'encrypt', {
+        cipher_id => $cipher_id,
+        plaintext => $large_data
+    });
+
+    if ($result->{success}) {
+        my $large_encrypted = $result->{result}->{encrypted};
+
+        $result = $bridge->call_python('crypto', 'decrypt', {
+            cipher_id => $cipher_id,
+            hex_ciphertext => $large_encrypted
+        });
+
+        if ($result->{success} && $result->{result}->{decrypted} eq $large_data) {
+            print "Large data encryption: PASS\n";
+        } else {
+            print "Large data encryption: FAIL\n";
+        }
+    } else {
+        print "Large data encryption: FAIL - " . $result->{error} . "\n";
+    }
+
+    # Cleanup
+    $bridge->call_python('crypto', 'cleanup_cipher', { cipher_id => $cipher_id });
+    unlink $test_key_file if -f $test_key_file;
+
+    return 1;
+}
+
+# Test both modes
+test_crypto_mode("Process Mode", 0);
+test_crypto_mode("Daemon Mode", 1);
+
+print "\n=== Crypto Module Validation Complete ===\n";
+```
+
+**Expected Results**:
+- Encryption/decryption should round-trip perfectly for all data types
+- Multiple cipher algorithms should work correctly
+- PEM key files should be processed correctly
+- Hash functions should generate consistent outputs
+- Large data encryption should work without memory issues
+- Unicode characters should be preserved exactly
+- Error conditions should generate appropriate messages
+
+---
+
+### **BASELINE-008: Quick Validation of All Modules**
 
 **Epic**: Comprehensive Baseline
 **Story Type**: Smoke Test
@@ -997,7 +1272,7 @@ print "\n=== Quick Module Validation Complete ===\n";
 
 ---
 
-### **BASELINE-008: Data Type Preservation Testing**
+### **BASELINE-009: Data Type Preservation Testing**
 
 **Epic**: Data Integrity
 **Story Type**: Functional
@@ -1198,18 +1473,20 @@ print "\n=== Data Type Preservation Test Complete ===\n";
 
 ### **Execution Order**
 
-1. **Start with BASELINE-007**: Quick validation of all modules
+1. **Start with BASELINE-008**: Quick validation of all modules
 2. **Run BASELINE-001**: Test module (simplest and most critical)
-3. **Run BASELINE-008**: Data type preservation (fundamental)
-4. **Execute remaining tests** based on your system's available services
+3. **Run BASELINE-009**: Data type preservation (fundamental)
+4. **Run BASELINE-007**: Crypto module (if cryptographic operations are needed)
+5. **Execute remaining tests** based on your system's available services
 
 ### **Success Criteria**
 
 | Test | Critical Success Criteria |
 |------|---------------------------|
 | **BASELINE-001** | All test module functions work in both modes |
-| **BASELINE-007** | At least 9/11 modules accessible in both modes |
-| **BASELINE-008** | 100% data type preservation accuracy |
+| **BASELINE-007** | Crypto encryption/decryption round-trips work perfectly |
+| **BASELINE-008** | At least 9/11 modules accessible in both modes |
+| **BASELINE-009** | 100% data type preservation accuracy |
 | **Individual Modules** | Core functionality works without errors |
 
 ### **Failure Investigation**
