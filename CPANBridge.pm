@@ -24,10 +24,21 @@ our $PYTHON_PATH = undef;
 # Daemon configuration
 our $DAEMON_MODE = $ENV{CPAN_BRIDGE_DAEMON} // 1;          # Enable daemon by default
 our $FALLBACK_ENABLED = $ENV{CPAN_BRIDGE_FALLBACK} // 1;   # Enable fallback by default
-our $DAEMON_SOCKET = $ENV{CPAN_BRIDGE_SOCKET} || '/tmp/cpan_bridge.sock';
+our $DAEMON_SOCKET = $ENV{CPAN_BRIDGE_SOCKET} || _get_default_socket_path();
 our $DAEMON_TIMEOUT = $ENV{CPAN_BRIDGE_DAEMON_TIMEOUT} || 30;
 our $DAEMON_STARTUP_TIMEOUT = $ENV{CPAN_BRIDGE_STARTUP_TIMEOUT} || 10;
 our $DAEMON_SCRIPT = undef;
+
+# Get platform-appropriate default socket path
+sub _get_default_socket_path {
+    if ($^O eq 'MSWin32') {
+        # Windows: Default to named pipe style, will be overridden by socket info file
+        return '\\\\.\\pipe\\cpan_bridge';
+    } else {
+        # Unix-like: Use traditional Unix domain socket
+        return '/tmp/cpan_bridge.sock';
+    }
+}
 
 sub new {
     my ($class, %args) = @_;
@@ -600,17 +611,14 @@ sub _ensure_daemon_running {
 sub _ping_daemon {
     my $self = shift;
 
-    return 0 unless -S $DAEMON_SOCKET;
+    # Cross-platform daemon detection
+    my $socket_available = $self->_check_daemon_socket_availability();
+    return 0 unless $socket_available;
 
     my $ping_successful = 0;
 
     eval {
-        my $socket = IO::Socket::UNIX->new(
-            Peer => $DAEMON_SOCKET,
-            Type => SOCK_STREAM,
-            Timeout => 2
-        );
-
+        my $socket = $self->_create_daemon_socket();
         return unless $socket;
 
         # Send ping request
@@ -657,6 +665,133 @@ sub _ping_daemon {
     return $ping_successful;
 }
 
+# Check if daemon socket is available (cross-platform)
+sub _check_daemon_socket_availability {
+    my $self = shift;
+
+    if ($^O eq 'MSWin32') {
+        # Windows: Check for socket info file or try to read existing socket info
+        my $socket_info_file = 'cpan_bridge_socket.txt';
+
+        if (-f $socket_info_file) {
+            $self->_debug("Found Windows socket info file: $socket_info_file");
+            return 1;
+        }
+
+        # Check if DAEMON_SOCKET looks like TCP format (host:port)
+        if ($DAEMON_SOCKET =~ /^(.+):(\d+)$/) {
+            $self->_debug("Windows TCP socket format detected: $DAEMON_SOCKET");
+            return 1;
+        }
+
+        $self->_debug("No Windows daemon socket info found");
+        return 0;
+    } else {
+        # Unix-like: Check for Unix domain socket file
+        if (-S $DAEMON_SOCKET) {
+            $self->_debug("Unix domain socket found: $DAEMON_SOCKET");
+            return 1;
+        }
+
+        $self->_debug("No Unix domain socket found at: $DAEMON_SOCKET");
+        return 0;
+    }
+}
+
+# Create appropriate socket connection (cross-platform)
+sub _create_daemon_socket {
+    my $self = shift;
+
+    if ($^O eq 'MSWin32') {
+        # Windows: Use TCP socket
+        my $socket_info = $self->_get_windows_socket_info();
+        return undef unless $socket_info;
+
+        my ($host, $port) = @$socket_info;
+        $self->_debug("Connecting to Windows TCP socket: $host:$port");
+
+        return IO::Socket::INET->new(
+            PeerAddr => $host,
+            PeerPort => $port,
+            Proto    => 'tcp',
+            Timeout  => 2
+        );
+    } else {
+        # Unix-like: Use Unix domain socket
+        $self->_debug("Connecting to Unix domain socket: $DAEMON_SOCKET");
+
+        return IO::Socket::UNIX->new(
+            Peer => $DAEMON_SOCKET,
+            Type => SOCK_STREAM,
+            Timeout => 2
+        );
+    }
+}
+
+# Get Windows socket info (host and port)
+sub _get_windows_socket_info {
+    my $self = shift;
+
+    # Try to read from socket info file first
+    my $socket_info_file = 'cpan_bridge_socket.txt';
+    my $socket_path = $DAEMON_SOCKET;
+
+    if (-f $socket_info_file) {
+        eval {
+            open my $fh, '<', $socket_info_file or die "Cannot read socket info: $!";
+            $socket_path = <$fh>;
+            chomp $socket_path if $socket_path;
+            close $fh;
+            $self->_debug("Read socket info from file: $socket_path");
+        };
+
+        if ($@) {
+            $self->_debug("Error reading socket info file: $@");
+            return undef;
+        }
+    }
+
+    # Parse TCP socket format (host:port)
+    if ($socket_path && $socket_path =~ /^(.+):(\d+)$/) {
+        my ($host, $port) = ($1, $2);
+        $self->_debug("Parsed Windows socket info: $host:$port");
+        return [$host, $port];
+    }
+
+    $self->_debug("Invalid Windows socket format: $socket_path");
+    return undef;
+}
+
+# Create daemon socket with extended timeout for requests
+sub _create_daemon_socket_with_timeout {
+    my $self = shift;
+
+    if ($^O eq 'MSWin32') {
+        # Windows: Use TCP socket with daemon timeout
+        my $socket_info = $self->_get_windows_socket_info();
+        return undef unless $socket_info;
+
+        my ($host, $port) = @$socket_info;
+        $self->_debug("Connecting to Windows TCP socket with timeout: $host:$port");
+
+        return IO::Socket::INET->new(
+            PeerAddr => $host,
+            PeerPort => $port,
+            Proto    => 'tcp',
+            Timeout  => $DAEMON_TIMEOUT
+        );
+    } else {
+        # Unix-like: Use Unix domain socket with daemon timeout
+        $self->_debug("Connecting to Unix domain socket with timeout: $DAEMON_SOCKET");
+
+        return IO::Socket::UNIX->new(
+            Peer => $DAEMON_SOCKET,
+            Type => SOCK_STREAM,
+            Timeout => $DAEMON_TIMEOUT
+        );
+    }
+}
+
 # Start daemon process
 sub _start_daemon {
     my $self = shift;
@@ -666,23 +801,39 @@ sub _start_daemon {
 
     $self->_debug("Starting daemon: $daemon_script");
 
-    # Start daemon in background
-    my $pid = fork();
-    if (!defined $pid) {
-        $self->_debug("Failed to fork daemon process: $!");
-        return 0;
-    }
+    # Platform-specific daemon startup
+    my $pid;
+    if ($^O eq 'MSWin32') {
+        # Windows: Use system() with START command for background execution
+        my $python_exe = $self->_get_python_executable();
+        my $command = qq{start /B "$python_exe" "$daemon_script"};
+        $self->_debug("Windows daemon command: $command");
 
-    if ($pid == 0) {
-        # Child process - start daemon
-        # Close standard handles to detach
-        close STDIN;
-        close STDOUT;
-        close STDERR;
+        my $result = system($command);
+        if ($result != 0) {
+            $self->_debug("Failed to start Windows daemon: $result");
+            return 0;
+        }
+        $pid = "background";  # We don't get actual PID on Windows with START
+    } else {
+        # Unix: Use fork() as before
+        $pid = fork();
+        if (!defined $pid) {
+            $self->_debug("Failed to fork daemon process: $!");
+            return 0;
+        }
 
-        # Execute daemon
-        exec($self->_get_python_executable(), $daemon_script);
-        exit(1);  # Should never reach here
+        if ($pid == 0) {
+            # Child process - start daemon
+            # Close standard handles to detach
+            close STDIN;
+            close STDOUT;
+            close STDERR;
+
+            # Execute daemon
+            exec($self->_get_python_executable(), $daemon_script);
+            exit(1);  # Should never reach here
+        }
     }
 
     # Parent process - wait for daemon to start
@@ -690,7 +841,7 @@ sub _start_daemon {
 
     for my $i (1..$DAEMON_STARTUP_TIMEOUT) {
         sleep(1);
-        if (-S $DAEMON_SOCKET && $self->_ping_daemon()) {
+        if ($self->_check_daemon_socket_availability() && $self->_ping_daemon()) {
             $self->_debug("Daemon started successfully");
             return 1;
         }
@@ -738,41 +889,8 @@ sub _send_daemon_request {
     my ($self, $request) = @_;
 
     eval {
-        my $socket;
-
-        # Platform-specific socket connection
-        if ($^O eq 'MSWin32') {
-            # Windows: Try to read socket info from file
-            my $socket_info_file = 'cpan_bridge_socket.txt';
-            my $socket_path = $DAEMON_SOCKET;
-
-            if (-f $socket_info_file) {
-                open my $fh, '<', $socket_info_file or die "Cannot read socket info: $!";
-                $socket_path = <$fh>;
-                chomp $socket_path;
-                close $fh;
-            }
-
-            # Parse TCP socket info (host:port)
-            if ($socket_path =~ /^(.+):(\d+)$/) {
-                my ($host, $port) = ($1, $2);
-                $socket = IO::Socket::INET->new(
-                    PeerAddr => $host,
-                    PeerPort => $port,
-                    Proto    => 'tcp',
-                    Timeout  => $DAEMON_TIMEOUT
-                );
-            } else {
-                die "Invalid socket format for Windows: $socket_path";
-            }
-        } else {
-            # Unix-like systems: Use Unix domain socket
-            $socket = IO::Socket::UNIX->new(
-                Peer => $DAEMON_SOCKET,
-                Type => SOCK_STREAM,
-                Timeout => $DAEMON_TIMEOUT
-            );
-        }
+        # Use cross-platform socket creation
+        my $socket = $self->_create_daemon_socket_with_timeout();
 
         unless ($socket) {
             return {
