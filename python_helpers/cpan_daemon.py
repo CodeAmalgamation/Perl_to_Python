@@ -1617,6 +1617,9 @@ class CPANBridgeDaemon:
             except:
                 pass
 
+            # Complete request tracking (decrement concurrent request count)
+            self.resource_manager.complete_request()
+
             # Clean up connection from active connections
             with self.connection_lock:
                 if connection_id in self.active_connections:
