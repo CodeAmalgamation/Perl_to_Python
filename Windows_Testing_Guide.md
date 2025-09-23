@@ -166,7 +166,7 @@ perl -e "use IO::Socket::INET; use JSON::PP; open my $fh, '<', 'cpan_bridge_sock
 ```cmd
 REM Terminal 2 - Test through the actual Perl interface
 cd C:\Users\sxdixit\ds\Perl_to_Python-architecture-revamp
-perl -I. -e "use CPANBridge; my $bridge = CPANBridge->new(); print \"Testing through CPANBridge.pm:\n\"; my $result = $bridge->call_helper('email_helper', 'validate_email', 'test@example.com'); print \"Email validation result: '$result'\n\";"
+perl -I. -e "use CPANBridge; my $bridge = CPANBridge->new(); print \"Testing through CPANBridge.pm:\n\"; my $result = $bridge->call_python('email_helper', 'validate_email', 'test@example.com'); print \"Email validation result: '$result'\n\";"
 ```
 
 ## Phase 7: Cleanup and Shutdown Testing
