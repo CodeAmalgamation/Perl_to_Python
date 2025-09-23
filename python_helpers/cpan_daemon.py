@@ -1617,6 +1617,12 @@ class CPANBridgeDaemon:
             except:
                 pass
 
+            # Clean up connection from active connections
+            with self.connection_lock:
+                if connection_id in self.active_connections:
+                    del self.active_connections[connection_id]
+                    logger.debug(f"Connection {connection_id} cleaned up after request completion")
+
     def _cleanup_thread_func(self):
         """Background thread for periodic cleanup"""
         logger.info("Cleanup thread started")
@@ -1680,10 +1686,21 @@ class CPANBridgeDaemon:
 
                 # Log basic health stats
                 uptime = time.time() - self.stats['start_time']
+                # Enhanced connection monitoring
+                current_connections = len(self.active_connections)
+                peak_connections = self.stats.get('peak_connections', 0)
+
                 logger.info(f"Health check - Uptime: {uptime:.0f}s, "
                            f"Requests: {self.stats['requests_processed']}, "
                            f"Errors: {self.stats['requests_failed']}, "
-                           f"Active connections: {len(self.active_connections)}")
+                           f"Active connections: {current_connections}/{peak_connections} (current/peak)")
+
+                # Warn about potential connection leaks
+                if current_connections > 50:  # Reasonable threshold
+                    logger.warning(f"High connection count detected: {current_connections} active connections. "
+                                 "This may indicate a connection leak.")
+                elif current_connections > 20:
+                    logger.info(f"Elevated connection count: {current_connections} active connections.")
 
                 # Log resource status if there are issues
                 try:
