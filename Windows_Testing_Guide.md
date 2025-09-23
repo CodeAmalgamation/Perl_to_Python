@@ -114,16 +114,16 @@ REM Terminal 2 - Test database module (available in daemon)
 perl -e "use IO::Socket::INET; use JSON::PP; open my $fh, '<', 'cpan_bridge_socket.txt'; my $socket_path = <$fh>; chomp $socket_path; close $fh; my ($host, $port) = split ':', $socket_path; my $sock = IO::Socket::INET->new(PeerAddr => $host, PeerPort => $port, Proto => 'tcp') or die \"Cannot connect: $!\"; my $request = encode_json({module => 'database', function => 'connect', params => [], request_id => 'db_' . time()}); print $sock $request . \"\n\"; my $response = <$sock>; print \"Database Response: $response\"; close $sock;"
 ```
 
-### Step 7: Test Database Operations
+### Step 7: Test XML Operations
 ```cmd
-REM Terminal 2 - Test db_helper
-perl -e "use IO::Socket::INET; use JSON::PP; open my $fh, '<', 'cpan_bridge_socket.txt'; my $socket_path = <$fh>; chomp $socket_path; close $fh; my ($host, $port) = split ':', $socket_path; my $sock = IO::Socket::INET->new(PeerAddr => $host, PeerPort => $port, Proto => 'tcp') or die \"Cannot connect: $!\"; my $request = encode_json({module => 'db_helper', function => 'test_connection', params => [], request_id => 'db_' . time()}); print $sock $request . \"\n\"; my $response = <$sock>; print \"DB Test Response: $response\"; close $sock;"
+REM Terminal 2 - Test xml_helper
+perl -e "use IO::Socket::INET; use JSON::PP; open my $fh, '<', 'cpan_bridge_socket.txt'; my $socket_path = <$fh>; chomp $socket_path; close $fh; my ($host, $port) = split ':', $socket_path; my $sock = IO::Socket::INET->new(PeerAddr => $host, PeerPort => $port, Proto => 'tcp') or die \"Cannot connect: $!\"; my $request = encode_json({module => 'xml_helper', function => 'xml_in', params => ['<test>data</test>'], request_id => 'xml_' . time()}); print $sock $request . \"\n\"; my $response = <$sock>; print \"XML Response: $response\"; close $sock;"
 ```
 
-### Step 8: Test JSON Operations
+### Step 8: Test Email Operations
 ```cmd
-REM Terminal 2 - Test json_helper
-perl -e "use IO::Socket::INET; use JSON::PP; open my $fh, '<', 'cpan_bridge_socket.txt'; my $socket_path = <$fh>; chomp $socket_path; close $fh; my ($host, $port) = split ':', $socket_path; my $sock = IO::Socket::INET->new(PeerAddr => $host, PeerPort => $port, Proto => 'tcp') or die \"Cannot connect: $!\"; my $request = encode_json({module => 'json_helper', function => 'parse_json', params => ['{\"test\": \"data\", \"number\": 42}'], request_id => 'json_' . time()}); print $sock $request . \"\n\"; my $response = <$sock>; print \"JSON Parse Response: $response\"; close $sock;"
+REM Terminal 2 - Test email_helper
+perl -e "use IO::Socket::INET; use JSON::PP; open my $fh, '<', 'cpan_bridge_socket.txt'; my $socket_path = <$fh>; chomp $socket_path; close $fh; my ($host, $port) = split ':', $socket_path; my $sock = IO::Socket::INET->new(PeerAddr => $host, PeerPort => $port, Proto => 'tcp') or die \"Cannot connect: $!\"; my $request = encode_json({module => 'email_helper', function => 'validate_email', params => ['test@example.com'], request_id => 'email_' . time()}); print $sock $request . \"\n\"; my $response = <$sock>; print \"Email Response: $response\"; close $sock;"
 ```
 
 ## Phase 4: Performance and Concurrent Testing
@@ -131,7 +131,7 @@ perl -e "use IO::Socket::INET; use JSON::PP; open my $fh, '<', 'cpan_bridge_sock
 ### Step 9: Concurrent Connection Test
 ```cmd
 REM Terminal 2 - Run multiple connections simultaneously
-for /L %%i in (1,1,5) do start /B perl -e "use IO::Socket::INET; use JSON::PP; open my $fh, '<', 'cpan_bridge_socket.txt'; my $socket_path = <$fh>; chomp $socket_path; close $fh; my ($host, $port) = split ':', $socket_path; my $sock = IO::Socket::INET->new(PeerAddr => $host, PeerPort => $port, Proto => 'tcp') or die \"Cannot connect: $!\"; my $request = encode_json({module => 'string_helper', function => 'trim', params => ['  test string %%i  '], request_id => 'concurrent_%%i' . time()}); print $sock $request . \"\n\"; my $response = <$sock>; print \"Worker %%i Response: $response\"; close $sock;"
+for /L %%i in (1,1,5) do start /B perl -e "use IO::Socket::INET; use JSON::PP; open my $fh, '<', 'cpan_bridge_socket.txt'; my $socket_path = <$fh>; chomp $socket_path; close $fh; my ($host, $port) = split ':', $socket_path; my $sock = IO::Socket::INET->new(PeerAddr => $host, PeerPort => $port, Proto => 'tcp') or die \"Cannot connect: $!\"; my $request = encode_json({module => 'test', function => 'ping', params => [], request_id => 'concurrent_%%i' . time()}); print $sock $request . \"\n\"; my $response = <$sock>; print \"Worker %%i Response: $response\"; close $sock;"
 ```
 
 ### Step 10: Performance Monitoring
@@ -151,7 +151,7 @@ perl -e "use IO::Socket::INET; use JSON::PP; open my $fh, '<', 'cpan_bridge_sock
 ### Step 12: Test Security Validation
 ```cmd
 REM Terminal 2 - Test dangerous function detection
-perl -e "use IO::Socket::INET; use JSON::PP; open my $fh, '<', 'cpan_bridge_socket.txt'; my $socket_path = <$fh>; chomp $socket_path; close $fh; my ($host, $port) = split ':', $socket_path; my $sock = IO::Socket::INET->new(PeerAddr => $host, PeerPort => $port, Proto => 'tcp') or die \"Cannot connect: $!\"; my $request = encode_json({module => 'file_helper', function => 'eval', params => ['print \"test\"'], request_id => 'security_' . time()}); print $sock $request . \"\n\"; my $response = <$sock>; print \"Security Test Response: $response\"; close $sock;"
+perl -e "use IO::Socket::INET; use JSON::PP; open my $fh, '<', 'cpan_bridge_socket.txt'; my $socket_path = <$fh>; chomp $socket_path; close $fh; my ($host, $port) = split ':', $socket_path; my $sock = IO::Socket::INET->new(PeerAddr => $host, PeerPort => $port, Proto => 'tcp') or die \"Cannot connect: $!\"; my $request = encode_json({module => 'invalid_module', function => 'dangerous_eval', params => ['print \"test\"'], request_id => 'security_' . time()}); print $sock $request . \"\n\"; my $response = <$sock>; print \"Security Test Response: $response\"; close $sock;"
 ```
 
 ## Phase 6: Integration with Perl Bridge
@@ -160,7 +160,7 @@ perl -e "use IO::Socket::INET; use JSON::PP; open my $fh, '<', 'cpan_bridge_sock
 ```cmd
 REM Terminal 2 - Test through the actual Perl interface
 cd C:\Users\sxdixit\ds\Perl_to_Python-architecture-revamp
-perl -I. -e "use CPANBridge; my $bridge = CPANBridge->new(); print \"Testing through CPANBridge.pm:\n\"; my $result = $bridge->call_helper('string_helper', 'trim', '  hello world  '); print \"Trim result: '$result'\n\";"
+perl -I. -e "use CPANBridge; my $bridge = CPANBridge->new(); print \"Testing through CPANBridge.pm:\n\"; my $result = $bridge->call_helper('email_helper', 'validate_email', 'test@example.com'); print \"Email validation result: '$result'\n\";"
 ```
 
 ## Phase 7: Cleanup and Shutdown Testing
