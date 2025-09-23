@@ -113,6 +113,7 @@ your_project/
 
 ### Prerequisites
 - **Perl**: Core modules only (no CPAN required)
+  - Uses `JSON::PP` (included in Perl core since v5.14)
 - **Python**: 3.8+ with required packages:
   ```bash
   pip install oracledb paramiko openpyxl lxml cryptography psutil
@@ -450,8 +451,11 @@ python3 python_helpers/cpan_daemon.py
 export CPAN_BRIDGE_DEBUG=2
 perl your_script.pl
 
-# For security validation debugging
-tail -f /var/log/cpan_bridge_security.log
+# For security validation debugging (platform-specific)
+# Unix/Linux/macOS:
+tail -f /tmp/cpan_security.log
+# Windows:
+type %TEMP%\cpan_security.log
 ```
 
 ## Supported CPAN Modules

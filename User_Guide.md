@@ -69,7 +69,8 @@ $CPANBridge::DAEMON_MODE = 1;
 
 # Use exactly as before - no code changes needed!
 my $bridge = CPANBridge->new();
-my $result = $bridge->call_python('http', 'get', {
+my $result = $bridge->call_python('http', 'lwp_request', {
+    method => 'GET',
     url => 'https://api.github.com/users/octocat'
 });
 
