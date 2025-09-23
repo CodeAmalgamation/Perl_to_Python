@@ -110,9 +110,15 @@ perl -e "use IO::Socket::INET; use JSON::PP; open my $fh, '<', 'cpan_bridge_sock
 
 ### Step 6: Test Module Operations
 ```cmd
-REM Terminal 2 - Test database module (available in daemon)
-perl -e "use IO::Socket::INET; use JSON::PP; open my $fh, '<', 'cpan_bridge_socket.txt'; my $socket_path = <$fh>; chomp $socket_path; close $fh; my ($host, $port) = split ':', $socket_path; my $sock = IO::Socket::INET->new(PeerAddr => $host, PeerPort => $port, Proto => 'tcp') or die \"Cannot connect: $!\"; my $request = encode_json({module => 'database', function => 'connect', params => [], request_id => 'db_' . time()}); print $sock $request . \"\n\"; my $response = <$sock>; print \"Database Response: $response\"; close $sock;"
+REM Terminal 2 - Test database module with sample connection (expected to fail gracefully)
+perl -e "use IO::Socket::INET; use JSON::PP; open my $fh, '<', 'cpan_bridge_socket.txt'; my $socket_path = <$fh>; chomp $socket_path; close $fh; my ($host, $port) = split ':', $socket_path; my $sock = IO::Socket::INET->new(PeerAddr => $host, PeerPort => $port, Proto => 'tcp') or die \"Cannot connect: $!\"; my $request = encode_json({module => 'database', function => 'connect', params => ['dbi:Oracle:test', 'testuser', 'testpass'], request_id => 'db_' . time()}); print $sock $request . \"\n\"; my $response = <$sock>; print \"Database Response: $response\"; close $sock;"
 ```
+
+**Note:** This test uses dummy credentials and will fail to connect, but it validates that:
+- The daemon accepts the request format
+- The database module loads correctly
+- Parameters are passed properly
+- A proper error response is returned
 
 ### Step 7: Test XML Operations
 ```cmd
