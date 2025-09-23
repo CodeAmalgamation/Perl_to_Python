@@ -63,21 +63,25 @@ ps aux | grep cpan_daemon
 use strict;
 use warnings;
 use CPANBridge;
+use Data::Dumper;
 
 # Enable high-performance daemon mode
 $CPANBridge::DAEMON_MODE = 1;
 
 # Use exactly as before - no code changes needed!
 my $bridge = CPANBridge->new();
-my $result = $bridge->call_python('http', 'lwp_request', {
+my $result = $bridge->call_python('http_helper', 'lwp_request', {
     method => 'GET',
     url => 'https://api.github.com/users/octocat'
 });
 
 if ($result->{success}) {
     print "Success! Got response from GitHub API\n";
+    print ($result->{result}->{body});
 } else {
     print "Error: " . $result->{error} . "\n";
+    print "Full error response:\n";
+    print Dumper($result);
 }
 ```
 
@@ -85,23 +89,29 @@ if ($result->{success}) {
 
 ```perl
 #!/usr/bin/perl
+
 use Time::HiRes qw(time);
+use lib ".";
 use CPANBridge;
 
 $CPANBridge::DAEMON_MODE = 1;
 my $bridge = CPANBridge->new();
 
 my $start = time();
+printf "Starting performance test with daemon fix\n";
 
-# Make 10 rapid requests
-for my $i (1..10) {
-    my $result = $bridge->call_python('test', 'ping', { call => $i });
-    print "Call $i: " . ($result->{success} ? "✅" : "❌") . "\n";
+for my $i (1 .. 10) {
+    my $result = $bridge->call_python('test', 'ping', []);
+    if ($result->{success}) {
+        print "Call $i: ✅ (result: " . ($result->{result} || 'success') . ")\n";
+    } else {
+        print "Call $i: ❌ (error: " . ($result->{error} || 'unknown error') . ")\n";
+    }
 }
 
 my $duration = time() - $start;
-printf "🚀 Completed 10 calls in %.3f seconds (%.1f calls/sec)\n",
-       $duration, 10/$duration;
+printf "🚀 Completed 10 calls in %.3f seconds (%.1f calls/sec)\n", $duration, 10/$duration;
+
 ```
 
 **Expected Result:** >1000 calls/second (vs ~20 calls/second in process mode)

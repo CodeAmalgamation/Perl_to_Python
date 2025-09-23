@@ -2,6 +2,7 @@
 use strict;
 use warnings;
 use CPANBridge;
+use Data::Dumper;
 
 # Enable high-performance daemon mode
 $CPANBridge::DAEMON_MODE = 1;
@@ -15,12 +16,9 @@ my $result = $bridge->call_python('http_helper', 'lwp_request', {
 
 if ($result->{success}) {
     print "Success! Got response from GitHub API\n";
-    print "Full response:\n";
-    use Data::Dumper;
-    print Dumper($result);
+    print ($result->{result}->{body});
 } else {
     print "Error: " . $result->{error} . "\n";
     print "Full error response:\n";
-    use Data::Dumper;
     print Dumper($result);
 }
