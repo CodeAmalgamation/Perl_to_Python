@@ -1630,12 +1630,12 @@ class CPANBridgeDaemon:
                 logger.debug("Running periodic cleanup...")
 
                 # Clean up stale connections
-                current_time = datetime.now()
+                current_time = time.time()  # Use timestamp for consistency
                 stale_connections = []
 
                 with self.connection_lock:
                     for conn_id, conn_info in list(self.active_connections.items()):
-                        time_since_activity = (current_time - conn_info.last_activity).total_seconds()
+                        time_since_activity = current_time - conn_info.last_activity
                         if time_since_activity > STALE_CONNECTION_TIMEOUT:
                             stale_connections.append(conn_id)
                             logger.debug(f"Found stale connection {conn_id} - {time_since_activity:.1f}s since last activity")
