@@ -108,13 +108,10 @@ perl -e "use IO::Socket::INET; use JSON::PP; open my $fh, '<', 'cpan_bridge_sock
 
 ## Phase 3: Core Module Testing
 
-### Step 6: Test File Operations
+### Step 6: Test Module Operations
 ```cmd
-REM Create test file first
-echo test content for daemon > C:\temp\test_daemon_file.txt
-
-REM Terminal 2 - Test file_helper
-perl -e "use IO::Socket::INET; use JSON::PP; open my $fh, '<', 'cpan_bridge_socket.txt'; my $socket_path = <$fh>; chomp $socket_path; close $fh; my ($host, $port) = split ':', $socket_path; my $sock = IO::Socket::INET->new(PeerAddr => $host, PeerPort => $port, Proto => 'tcp') or die \"Cannot connect: $!\"; my $request = encode_json({module => 'file_helper', function => 'read_file', params => ['C:/temp/test_daemon_file.txt'], request_id => 'file_' . time()}); print $sock $request . \"\n\"; my $response = <$sock>; print \"File Read Response: $response\"; close $sock;"
+REM Terminal 2 - Test database module (available in daemon)
+perl -e "use IO::Socket::INET; use JSON::PP; open my $fh, '<', 'cpan_bridge_socket.txt'; my $socket_path = <$fh>; chomp $socket_path; close $fh; my ($host, $port) = split ':', $socket_path; my $sock = IO::Socket::INET->new(PeerAddr => $host, PeerPort => $port, Proto => 'tcp') or die \"Cannot connect: $!\"; my $request = encode_json({module => 'database', function => 'connect', params => [], request_id => 'db_' . time()}); print $sock $request . \"\n\"; my $response = <$sock>; print \"Database Response: $response\"; close $sock;"
 ```
 
 ### Step 7: Test Database Operations
