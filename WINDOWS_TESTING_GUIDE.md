@@ -16,7 +16,7 @@ $tcp.Connect($host, $port)
 $stream = $tcp.GetStream()
 $writer = New-Object System.IO.StreamWriter($stream)
 $reader = New-Object System.IO.StreamReader($stream)
-$writer.WriteLine('{"action":"health_check","request_id":"test"}')
+$writer.WriteLine('{"action":"call_module","module":"system","function":"health","args":[],"request_id":"test"}')
 $writer.Flush()
 $response = $reader.ReadLine()
 Write-Host "Health Response: $response"
@@ -92,7 +92,7 @@ powershell -Command "$socket = Get-Content cpan_bridge_socket.txt; $host, $port 
 ### Step 4: Test Health Endpoint
 ```cmd
 REM Terminal 2 - Health check
-perl -e "use IO::Socket::INET; use JSON::PP::PP; open my $fh, '<', 'cpan_bridge_socket.txt'; my $socket_path = <$fh>; chomp $socket_path; close $fh; my ($host, $port) = split ':', $socket_path; my $sock = IO::Socket::INET->new(PeerAddr => $host, PeerPort => $port, Proto => 'tcp') or die \"Cannot connect: $!\"; my $request = encode_json({action => 'health_check', request_id => 'test_' . time()}); print $sock $request . \"\n\"; my $response = <$sock>; print \"Health Response: $response\"; close $sock;"
+perl -e "use IO::Socket::INET; use JSON::PP; open my $fh, '<', 'cpan_bridge_socket.txt'; my $socket_path = <$fh>; chomp $socket_path; close $fh; my ($host, $port) = split ':', $socket_path; my $sock = IO::Socket::INET->new(PeerAddr => $host, PeerPort => $port, Proto => 'tcp') or die \"Cannot connect: $!\"; my $request = encode_json({action => 'call_module', module => 'system', function => 'health', args => [], request_id => 'test_' . time()}); print $sock $request . \"\n\"; my $response = <$sock>; print \"Health Response: $response\"; close $sock;"
 ```
 
 **Expected Response:**
@@ -103,7 +103,7 @@ perl -e "use IO::Socket::INET; use JSON::PP::PP; open my $fh, '<', 'cpan_bridge_
 ### Step 5: Test System Info
 ```cmd
 REM Terminal 2 - System info
-perl -e "use IO::Socket::INET; use JSON::PP::PP; open my $fh, '<', 'cpan_bridge_socket.txt'; my $socket_path = <$fh>; chomp $socket_path; close $fh; my ($host, $port) = split ':', $socket_path; my $sock = IO::Socket::INET->new(PeerAddr => $host, PeerPort => $port, Proto => 'tcp') or die \"Cannot connect: $!\"; my $request = encode_json({action => 'system_info', request_id => 'sysinfo_' . time()}); print $sock $request . \"\n\"; my $response = <$sock>; print \"System Info: $response\"; close $sock;"
+perl -e "use IO::Socket::INET; use JSON::PP; open my $fh, '<', 'cpan_bridge_socket.txt'; my $socket_path = <$fh>; chomp $socket_path; close $fh; my ($host, $port) = split ':', $socket_path; my $sock = IO::Socket::INET->new(PeerAddr => $host, PeerPort => $port, Proto => 'tcp') or die \"Cannot connect: $!\"; my $request = encode_json({action => 'call_module', module => 'system', function => 'info', args => [], request_id => 'sysinfo_' . time()}); print $sock $request . \"\n\"; my $response = <$sock>; print \"System Info: $response\"; close $sock;"
 ```
 
 ## Phase 3: Core Module Testing
@@ -140,7 +140,7 @@ for /L %%i in (1,1,5) do start /B perl -e "use IO::Socket::INET; use JSON::PP; o
 ### Step 10: Performance Monitoring
 ```cmd
 REM Terminal 2 - Check performance stats
-perl -e "use IO::Socket::INET; use JSON::PP; open my $fh, '<', 'cpan_bridge_socket.txt'; my $socket_path = <$fh>; chomp $socket_path; close $fh; my ($host, $port) = split ':', $socket_path; my $sock = IO::Socket::INET->new(PeerAddr => $host, PeerPort => $port, Proto => 'tcp') or die \"Cannot connect: $!\"; my $request = encode_json({action => 'performance_stats', request_id => 'perf_' . time()}); print $sock $request . \"\n\"; my $response = <$sock>; print \"Performance Stats: $response\"; close $sock;"
+perl -e "use IO::Socket::INET; use JSON::PP; open my $fh, '<', 'cpan_bridge_socket.txt'; my $socket_path = <$fh>; chomp $socket_path; close $fh; my ($host, $port) = split ':', $socket_path; my $sock = IO::Socket::INET->new(PeerAddr => $host, PeerPort => $port, Proto => 'tcp') or die \"Cannot connect: $!\"; my $request = encode_json({action => 'call_module', module => 'system', function => 'performance', args => [], request_id => 'perf_' . time()}); print $sock $request . \"\n\"; my $response = <$sock>; print \"Performance Stats: $response\"; close $sock;"
 ```
 
 ## Phase 5: Error Handling and Edge Cases
