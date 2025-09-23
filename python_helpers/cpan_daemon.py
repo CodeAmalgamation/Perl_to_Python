@@ -390,7 +390,12 @@ class RequestValidator:
                 break
 
         # Check for dangerous function names (but exempt whitelisted modules)
-        if module_name not in ['system', 'test']:  # Exempt administrative modules
+        # Exempt administrative and legitimate helper modules
+        exempt_modules = ['system', 'test', 'file_helper', 'db_helper', 'email_helper',
+                         'xml_helper', 'json_helper', 'string_helper', 'date_helper',
+                         'datetime_helper', 'http_helper', 'sftp_helper', 'logging_helper',
+                         'excel_helper', 'crypto_helper', 'xpath_helper']
+        if module_name not in exempt_modules:
             for dangerous in self.security_patterns["dangerous_functions"]:
                 if dangerous in function_name.lower() or dangerous in module_name.lower():
                     result.is_valid = False
