@@ -223,7 +223,7 @@ class RequestValidator:
                         "prepare", "finish_statement", "begin_transaction", "commit", "rollback"],
             "xml_helper": ["xml_in", "xml_out", "escape_xml", "unescape_xml"],
             "xpath": ["new", "find", "findnodes", "findvalue", "exists"],
-            "http": ["lwp_request", "get", "post", "put", "delete", "head"],
+            "http_helper": ["lwp_request", "get", "post", "put", "delete", "head"],
             "datetime_helper": ["format_date", "parse_date", "add_days", "diff_days", "now"],
             "crypto": ["encrypt", "decrypt", "hash", "generate_key", "sign", "verify"],
             "email_helper": ["send_email", "send_html_email", "validate_email"],
@@ -1177,7 +1177,7 @@ class CPANBridgeDaemon:
             'database',         # Database operations (Oracle, Informix, etc.)
             'xml_helper',      # XML parsing and manipulation
             'xpath',           # XPath processing with lxml
-            'http',            # HTTP requests and web operations
+            'http_helper',     # HTTP requests and web operations
             'datetime_helper', # DateTime operations
             'crypto',          # Cryptography operations
             'email_helper',    # Email sending

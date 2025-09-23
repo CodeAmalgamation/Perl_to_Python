@@ -195,7 +195,7 @@ sub test_http_mode {
     my $bridge = CPANBridge->new();
 
     # Test 1: Simple GET request
-    my $result = $bridge->call_python('http', 'get', {
+    my $result = $bridge->call_python('http_helper', 'get', {
         url => 'https://httpbin.org/json'
     });
 
@@ -232,7 +232,7 @@ sub test_http_mode {
         array_field => [1, 2, 3]
     };
 
-    $result = $bridge->call_python('http', 'post', {
+    $result = $bridge->call_python('http_helper', 'post', {
         url => 'https://httpbin.org/post',
         json => $post_data,
         headers => { 'Content-Type' => 'application/json' }
@@ -1206,7 +1206,7 @@ sub quick_module_test {
 
     my @module_tests = (
         { module => 'test', function => 'ping', params => {} },
-        { module => 'http', function => 'get', params => { url => 'https://httpbin.org/json' } },
+        { module => 'http_helper', function => 'get', params => { url => 'https://httpbin.org/json' } },
         { module => 'database', function => 'connect', params => { dsn => 'dbi:Oracle:test', username => 'test', password => 'test' } },
         { module => 'sftp', function => 'connect', params => { hostname => 'localhost', username => 'test', password => 'test' } },
         { module => 'excel', function => 'create_workbook', params => { filename => '/tmp/test.xlsx' } },
