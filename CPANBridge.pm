@@ -3,7 +3,7 @@ package CPANBridge;
 
 use strict;
 use warnings;
-use JSON;
+use JSON::PP;
 use Carp;
 use FindBin;
 use File::Spec;
