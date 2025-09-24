@@ -678,8 +678,8 @@ sub _ping_daemon {
 sub _check_daemon_socket_availability {
     my $self = shift;
 
-    if ($^O eq 'MSWin32' || $^O eq 'msys') {
-        # Windows/MSYS: Check for socket info file or try to read existing socket info
+    if ($^O eq 'MSWin32') {
+        # Windows: Check for socket info file or try to read existing socket info
         my $socket_info_file = 'cpan_bridge_socket.txt';
 
         if (-f $socket_info_file) {
