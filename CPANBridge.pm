@@ -678,8 +678,8 @@ sub _ping_daemon {
 sub _check_daemon_socket_availability {
     my $self = shift;
 
-    if ($^O eq 'MSWin32') {
-        # Windows: Check for socket info file or try to read existing socket info
+    if ($^O eq 'MSWin32' || $^O eq 'msys') {
+        # Windows/MSYS: Check for socket info file or try to read existing socket info
         my $socket_info_file = 'cpan_bridge_socket.txt';
 
         if (-f $socket_info_file) {
@@ -711,13 +711,13 @@ sub _check_daemon_socket_availability {
 sub _create_daemon_socket {
     my $self = shift;
 
-    if ($^O eq 'MSWin32') {
-        # Native Windows: Use TCP socket
+    if ($^O eq 'MSWin32' || $^O eq 'msys') {
+        # Windows/MSYS: Use TCP socket
         my $socket_info = $self->_get_windows_socket_info();
         return undef unless $socket_info;
 
         my ($host, $port) = @$socket_info;
-        $self->_debug("Connecting to Windows TCP socket: $host:$port");
+        $self->_debug("Connecting to Windows/MSYS TCP socket: $host:$port");
 
         return IO::Socket::INET->new(
             PeerAddr => $host,

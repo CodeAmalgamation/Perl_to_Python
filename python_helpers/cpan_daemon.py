@@ -50,7 +50,11 @@ MIN_CLIENT_VERSION = "1.0.0"
 
 # Configuration from environment
 # Platform-specific socket path
-if os.name == 'nt':  # Windows
+def _is_msys():
+    """Detect MSYS environment"""
+    return sys.platform == 'msys' or 'MSYSTEM' in os.environ
+
+if os.name == 'nt' or _is_msys():  # Windows or MSYS
     DEFAULT_SOCKET = r'\\.\pipe\cpan_bridge'
 else:  # Unix-like systems
     DEFAULT_SOCKET = '/tmp/cpan_bridge.sock'
@@ -881,8 +885,8 @@ class HealthChecker:
         try:
             # Check socket connectivity (platform-specific)
             socket_path = getattr(self, 'actual_socket_path', SOCKET_PATH)
-            if os.name == 'nt':
-                # For Windows TCP socket, check if server is listening
+            if os.name == 'nt' or _is_msys():
+                # For Windows/MSYS TCP socket, check if server is listening
                 if hasattr(self, 'server_socket') and self.server_socket:
                     checks['socket_connectivity'] = {
                         'status': 'pass',
@@ -1764,8 +1768,8 @@ class CPANBridgeDaemon:
     def _create_socket(self):
         """Create and configure Unix domain socket"""
         # Platform-specific socket creation
-        if os.name == 'nt':  # Windows - use TCP localhost socket
-            # For Windows, use localhost TCP socket instead of Unix domain socket
+        if os.name == 'nt' or _is_msys():  # Windows/MSYS - use TCP localhost socket
+            # For Windows/MSYS, use localhost TCP socket instead of Unix domain socket
             self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             # Use a high port number to avoid conflicts
@@ -1787,9 +1791,9 @@ class CPANBridgeDaemon:
         # Start listening
         self.server_socket.listen(MAX_CONNECTIONS)
 
-        if os.name == 'nt':
+        if os.name == 'nt' or _is_msys():
             logger.info(f"TCP socket created at {self.actual_socket_path}")
-            # Save socket info for Windows Perl clients
+            # Save socket info for Windows/MSYS Perl clients
             try:
                 with open('cpan_bridge_socket.txt', 'w') as f:
                     f.write(self.actual_socket_path)
@@ -1896,7 +1900,7 @@ class CPANBridgeDaemon:
         # Cleanup socket file
         # Cleanup socket file (Unix only)
         try:
-            if os.name != 'nt' and os.path.exists(SOCKET_PATH):
+            if os.name != 'nt' and not _is_msys() and os.path.exists(SOCKET_PATH):
                 os.unlink(SOCKET_PATH)
                 logger.info(f"Removed socket file: {SOCKET_PATH}")
         except:
