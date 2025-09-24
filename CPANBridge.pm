@@ -10,6 +10,7 @@ use File::Spec;
 use IO::Socket::UNIX;
 use IO::Socket::INET;
 use Time::HiRes qw(time sleep);
+use Encode qw(encode decode);
 
 our $VERSION = '2.00';
 
@@ -629,7 +630,8 @@ sub _ping_daemon {
             timestamp => time()
         });
 
-        $socket->print($ping_request);
+        my $utf8_ping = encode('utf-8', $ping_request);
+        $socket->print($utf8_ping);
         $socket->shutdown(1);  # Close write end
 
         # Read response with timeout
@@ -644,6 +646,9 @@ sub _ping_daemon {
         };
 
         $socket->close();
+
+        # Decode UTF-8 response
+        $response = decode('utf-8', $response) if $response;
 
         if ($response) {
             my $result = $self->_safe_json_decode($response);
@@ -902,7 +907,8 @@ sub _send_daemon_request {
 
         # Send request
         my $request_json = $self->_safe_json_encode($request);
-        $socket->print($request_json);
+        my $utf8_json = encode('utf-8', $request_json);
+        $socket->print($utf8_json);
         $socket->shutdown(1);  # Close write end
 
         # Read response
@@ -910,6 +916,9 @@ sub _send_daemon_request {
         while (my $line = <$socket>) {
             $response .= $line;
         }
+
+        # Decode UTF-8 response
+        $response = decode('utf-8', $response) if $response;
 
         $socket->close();
 
