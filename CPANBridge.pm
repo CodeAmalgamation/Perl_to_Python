@@ -33,13 +33,17 @@ our $DAEMON_SCRIPT = undef;
 # Get platform-appropriate default socket path
 sub _get_default_socket_path {
     if ($^O eq 'MSWin32') {
-        # Windows: Default to named pipe style, will be overridden by socket info file
+        # Native Windows: Default to named pipe style, will be overridden by socket info file
         return '\\\\.\\pipe\\cpan_bridge';
+    } elsif ($^O eq 'msys') {
+        # MSYS: Use Unix-style paths but Windows-style process management
+        return '/tmp/cpan_bridge.sock';
     } else {
         # Unix-like: Use traditional Unix domain socket
         return '/tmp/cpan_bridge.sock';
     }
 }
+
 
 sub new {
     my ($class, %args) = @_;
@@ -248,9 +252,9 @@ sub _execute_with_timeout {
     my $output = '';
     
     eval {
-        if ($^O eq 'MSWin32') {
-            # Force file-based approach on Windows to avoid pipe deadlocks
-            $self->_debug("Using Windows file-based approach");
+        if ($^O eq 'MSWin32' || $^O eq 'msys') {
+            # Force file-based approach on Windows/MSYS to avoid pipe deadlocks
+            $self->_debug("Using Windows/MSYS file-based approach");
             $output = $self->_execute_with_files($command, $input);
         } elsif (eval { require IPC::Open3; 1 }) {
             $self->_debug("Using IPC::Open3 method");
@@ -674,8 +678,8 @@ sub _ping_daemon {
 sub _check_daemon_socket_availability {
     my $self = shift;
 
-    if ($^O eq 'MSWin32') {
-        # Windows: Check for socket info file or try to read existing socket info
+    if ($^O eq 'MSWin32' || $^O eq 'msys') {
+        # Windows/MSYS: Check for socket info file or try to read existing socket info
         my $socket_info_file = 'cpan_bridge_socket.txt';
 
         if (-f $socket_info_file) {
@@ -708,7 +712,7 @@ sub _create_daemon_socket {
     my $self = shift;
 
     if ($^O eq 'MSWin32') {
-        # Windows: Use TCP socket
+        # Native Windows: Use TCP socket
         my $socket_info = $self->_get_windows_socket_info();
         return undef unless $socket_info;
 
@@ -772,7 +776,7 @@ sub _create_daemon_socket_with_timeout {
     my $self = shift;
 
     if ($^O eq 'MSWin32') {
-        # Windows: Use TCP socket with daemon timeout
+        # Native Windows: Use TCP socket with daemon timeout
         my $socket_info = $self->_get_windows_socket_info();
         return undef unless $socket_info;
 
@@ -808,8 +812,8 @@ sub _start_daemon {
 
     # Platform-specific daemon startup
     my $pid;
-    if ($^O eq 'MSWin32') {
-        # Windows: Use system() with START command for background execution
+    if ($^O eq 'MSWin32' || $^O eq 'msys') {
+        # Windows/MSYS: Use system() with START command for background execution
         my $python_exe = $self->_get_python_executable();
         my $command = qq{start /B "$python_exe" "$daemon_script"};
         $self->_debug("Windows daemon command: $command");
