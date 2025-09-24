@@ -775,7 +775,7 @@ sub _get_windows_socket_info {
 sub _create_daemon_socket_with_timeout {
     my $self = shift;
 
-    if ($^O eq 'MSWin32') {
+    if ($^O eq 'MSWin32'|| $^O eq 'msys') {
         # Native Windows: Use TCP socket with daemon timeout
         my $socket_info = $self->_get_windows_socket_info();
         return undef unless $socket_info;
