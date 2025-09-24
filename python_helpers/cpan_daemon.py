@@ -228,7 +228,7 @@ class RequestValidator:
             "crypto": ["new", "encrypt", "decrypt", "cleanup_cipher", "hash", "generate_key", "sign", "verify"],
             "email_helper": ["send_email", "send_html_email", "validate_email"],
             "logging_helper": ["log_message", "log_error", "log_warning", "log_debug"],
-            "excel": ["create_workbook", "add_worksheet", "write_cell", "save_workbook"],
+            "excel": ["create_workbook", "add_worksheet", "write_cell", "close_workbook"],
             "sftp": ["connect", "put", "get", "delete", "list_files", "disconnect"],
             # Administrative modules
             "test": ["ping", "health", "stats", "echo"],

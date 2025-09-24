@@ -19,7 +19,7 @@ my $result = $bridge->call_python('crypto', 'new', {
 });
 
 if ($result->{success}) {
-    my $cipher_id = $result->{result}->{result}->{cipher_id};
+    my $cipher_id= $result->{result}->{result}->{cipher_id};
     print "✅ Cipher created successfully! ID: $cipher_id\n\n";
 
     # Test 2: Encrypt some data
