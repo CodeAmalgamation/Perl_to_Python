@@ -815,7 +815,7 @@ sub _start_daemon {
     if ($^O eq 'MSWin32') {
         # Native Windows: Use system() with START command for background execution
         my $python_exe = $self->_get_python_executable();
-        my $command = qq{start /B "$python_exe" "$daemon_script"};
+        my $command = qq{start /B "" "$python_exe" "$daemon_script"};
         $self->_debug("Windows daemon command: $command");
 
         my $result = system($command);
