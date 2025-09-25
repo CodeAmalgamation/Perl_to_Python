@@ -960,17 +960,71 @@ sub _send_daemon_request {
 sub _get_python_executable {
     my $self = shift;
 
+    # Use custom Python path if set
+    return $PYTHON_PATH if $PYTHON_PATH;
+
     # Check environment variable
     return $ENV{PYTHON_EXECUTABLE} if $ENV{PYTHON_EXECUTABLE};
 
-    # Try common Python executables
-    for my $python ('python3', 'python') {
-        my $path = `which $python 2>/dev/null`;
-        chomp $path;
-        return $python if $path && -x $path;
+    # Platform-specific Python executable search order
+    my @python_commands;
+    if ($^O eq 'MSWin32') {
+        # Windows: prefer py launcher, then standard names
+        @python_commands = (
+            'py',           # Python Launcher (recommended for Windows)
+            'python',       # Standard Python
+            'python.exe',   # Explicit .exe
+            'python3',      # Unix-style (some Windows installs)
+            'python3.exe'   # Unix-style with .exe
+        );
+    } elsif ($^O eq 'msys') {
+        # MSYS: hybrid approach - Unix names work but also try Windows style
+        @python_commands = (
+            'python3',      # MSYS typically has Unix-style names
+            'python',       # Generic fallback
+            'py',           # Windows py launcher might work
+            'python.exe'    # Windows executable
+        );
+    } else {
+        # Unix/Linux/macOS: standard Unix approach
+        @python_commands = (
+            'python3',
+            'python',
+            '/usr/bin/python3',
+            '/usr/bin/python',
+            '/usr/local/bin/python3',
+            '/usr/local/bin/python'
+        );
     }
 
-    return 'python3';  # Default fallback
+    # Try each command in order
+    for my $python (@python_commands) {
+        my $path;
+        if ($python =~ m{^/}) {
+            # Absolute path - check directly
+            if (-x $python) {
+                $self->_debug("Found Python executable: $python");
+                return $python;
+            }
+        } else {
+            # Relative command - use which/where
+            if ($^O eq 'MSWin32') {
+                # Windows: use 'where' command
+                $path = `where $python 2>nul`;
+            } else {
+                # Unix-like: use 'which' command
+                $path = `which $python 2>/dev/null`;
+            }
+            chomp $path;
+            if ($path && -x $path) {
+                $self->_debug("Found Python executable: $python (at $path)");
+                return $python;
+            }
+        }
+    }
+
+    # No Python found - this will cause an error
+    die "No Python executable found. Please install Python or set PYTHON_EXECUTABLE environment variable.";
 }
 
 # ===== END DAEMON METHODS =====
