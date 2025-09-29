@@ -106,14 +106,18 @@ sub getElementsByTagName {
 sub dispose {
     my $self = shift;
 
-    my $result = $XMLDOMHelper::bridge->call_python('xml_dom_helper', 'dispose_document', {
-        document_id => $self->{document_id}
-    });
+    # Try to dispose, but don't warn on errors since it's just cleanup
+    # Dispose errors are not critical - documents will be garbage collected anyway
+    eval {
+        my $result = $XMLDOMHelper::bridge->call_python('xml_dom_helper', 'dispose_document', {
+            document_id => $self->{document_id}
+        });
 
-    # Don't die on dispose errors - just warn
-    if (!$result->{success}) {
-        warn "Document dispose warning: " . $result->{error};
-    }
+        # Only log if debug is enabled
+        if ($CPANBridge::DEBUG_LEVEL && !$result->{success}) {
+            warn "Document dispose debug info: " . $result->{error};
+        }
+    };
 
     return 1;
 }
@@ -595,12 +599,30 @@ sub xql {
         });
     };
 
+    # Debug output for troubleshooting
+    if ($XMLDOMHelper::CPANBridge::DEBUG_LEVEL) {
+        if ($@) {
+            warn "DEBUG: XQL query eval error: $@";
+        }
+        if ($result && !$result->{success}) {
+            warn "DEBUG: XQL query failed: " . ($result->{error} // "unknown error");
+        }
+    }
+
     # Return empty array on any error (matches XML::XQL behavior)
     if ($@ || !$result || !$result->{success}) {
         return ();
     }
 
-    my $result_data = $result->{result}->{result};
+    # Check if the inner Python function call succeeded
+    my $python_result = $result->{result};
+    if (!$python_result || !$python_result->{success}) {
+        warn "DEBUG: Python XQL function failed: " . ($python_result->{error} // "unknown error");
+        return ();
+    }
+
+    my $result_data = $python_result->{result};
+
 
     if ($result_data && $result_data->{type} && $result_data->{type} eq 'nodelist') {
         # Convert node IDs back to Element objects for array context
@@ -633,16 +655,14 @@ sub xql_findvalue {
         return "";
     }
 
-    my $result = $XMLDOMHelper::bridge->call_python('xml_dom_helper', 'xql_find_value', {
-        node_id => $self->{node_id},
-        xpath_expression => $xpath
-    });
+    # Use the regular xql method and get text from first result
+    my @results = $self->xql($xpath);
 
-    if (!$result->{success}) {
-        return "";
+    if (@results && defined $results[0]) {
+        return $results[0]->getNodeValue() || "";
     }
 
-    return $result->{result}->{result}->{value} || "";
+    return "";
 }
 
 sub xql_exists {
@@ -653,16 +673,10 @@ sub xql_exists {
         return 0;
     }
 
-    my $result = $XMLDOMHelper::bridge->call_python('xml_dom_helper', 'xql_exists', {
-        node_id => $self->{node_id},
-        xpath_expression => $xpath
-    });
+    # Use the regular xql method and check if any results exist
+    my @results = $self->xql($xpath);
 
-    if (!$result->{success}) {
-        return 0;
-    }
-
-    return $result->{result}->{result}->{exists} ? 1 : 0;
+    return @results ? 1 : 0;
 }
 
 # ============================================================================

@@ -1528,54 +1528,30 @@ def _convert_to_lxml(et_node, document_id: str = None) -> Any:
     except Exception as e:
         raise Exception(f"ElementTree to lxml conversion failed: {str(e)}")
 
-def _convert_from_lxml(lxml_node, document_id: str, lxml_root, et_root) -> str:
+def _convert_from_lxml(lxml_node, document_id: str) -> str:
     """
-    Convert lxml result back to ElementTree node reference using positional mapping
+    Convert lxml result back to ElementTree node reference
+
+    Uses a simple approach: serialize the lxml node and create a new ElementTree node.
+    This ensures each result gets its own unique node reference.
 
     Args:
         lxml_node: lxml result node
         document_id: Document ID for node reference
-        lxml_root: The lxml root document for position calculation
-        et_root: The ElementTree root for position mapping
 
     Returns:
         Node ID string
     """
     try:
-        # Create XPath to find the position of this node in the lxml tree
-        # We'll use the node's position among siblings of the same tag
-
-        # Build path from root to this node
-        path_elements = []
-        current = lxml_node
-
-        while current is not None and current != lxml_root:
-            parent = current.getparent()
-            if parent is not None:
-                # Find position among siblings with same tag
-                siblings = [child for child in parent if child.tag == current.tag]
-                position = siblings.index(current) + 1  # 1-based indexing
-                path_elements.insert(0, (current.tag, position))
-            current = parent
-
-        # Now traverse the ElementTree using the same path
-        et_current = et_root
-        for tag, position in path_elements:
-            # Find children with matching tag
-            et_children = [child for child in et_current if child.tag == tag]
-            if position <= len(et_children):
-                et_current = et_children[position - 1]  # Convert to 0-based
-            else:
-                # Fallback: just use the element directly
-                break
-
-        return _create_node_reference(et_current, document_id)
-
-    except Exception as e:
-        # Fallback: create new node reference
+        # Convert lxml node to XML string and create new ElementTree node
         xml_string = etree.tostring(lxml_node, encoding='unicode')
         et_node = ET.fromstring(xml_string)
+
+        # Create and return node reference
         return _create_node_reference(et_node, document_id)
+
+    except Exception as e:
+        raise Exception(f"lxml to ElementTree conversion failed: {str(e)}")
 
 def xql_query(node_id: str, xpath_expression: str) -> Dict[str, Any]:
     """
@@ -1611,22 +1587,28 @@ def xql_query(node_id: str, xpath_expression: str) -> Dict[str, Any]:
 
         _debug(f"Executing XQL query: {xpath_expression} on node {node_id}")
 
+        lxml_success = False
         if LXML_AVAILABLE:
             # Use lxml for full XPath 1.0 support
             try:
                 lxml_root = _convert_to_lxml(source_node, document_id)
                 results = lxml_root.xpath(xpath_expression)
-                # Store both roots for conversion
-                et_root = DOCUMENTS[document_id]['root']
+                lxml_success = True
             except Exception as e:
-                return {
-                    'success': False,
-                    'error': f'XPath execution failed: {str(e)}'
-                }
-        else:
+                # lxml failed, fall back to ElementTree
+                lxml_success = False
+
+        if not lxml_success:
             # Fallback to ElementTree's limited XPath support
             try:
-                results = source_node.findall(xpath_expression)
+                # Convert absolute paths to relative paths for ElementTree
+                et_xpath = xpath_expression
+                if xpath_expression.startswith('//'):
+                    # Convert //Element to .//Element for ElementTree
+                    et_xpath = '.' + xpath_expression
+
+                results = source_node.findall(et_xpath)
+                _debug(f"ElementTree XPath results: {len(results)}")
             except Exception as e:
                 return {
                     'success': False,
@@ -1641,12 +1623,12 @@ def xql_query(node_id: str, xpath_expression: str) -> Dict[str, Any]:
             _debug(f"Processing {len(results)} XPath results")
 
             for i, result_node in enumerate(results):
-                if LXML_AVAILABLE:
+                if lxml_success:
                     # lxml result
                     if hasattr(result_node, 'tag'):  # Element node
                         try:
                             _debug(f"Converting lxml result {i}: tag={result_node.tag}, attrib={dict(result_node.attrib)}")
-                            converted_node_id = _convert_from_lxml(result_node, document_id, lxml_root, et_root)
+                            converted_node_id = _convert_from_lxml(result_node, document_id)
                             node_ids.append(converted_node_id)
                             _debug(f"Successfully converted result {i} to node_id: {converted_node_id}")
                         except Exception as e:
@@ -1731,7 +1713,9 @@ def xql_find_value(node_id: str, xpath: str) -> Dict[str, Any]:
         return {
             'success': True,
             'result': {
-                'value': result_data['value']
+                'result': {
+                    'value': result_data['value']
+                }
             }
         }
     elif result_data['type'] == 'nodelist' and result_data['length'] > 0:
@@ -1742,7 +1726,19 @@ def xql_find_value(node_id: str, xpath: str) -> Dict[str, Any]:
             return {
                 'success': True,
                 'result': {
-                    'value': text_result['result']['value']
+                    'result': {
+                        'value': text_result['result']['value']
+                    }
+                }
+            }
+        else:
+            # get_node_value failed, return empty value
+            return {
+                'success': True,
+                'result': {
+                    'result': {
+                        'value': ""
+                    }
                 }
             }
 
@@ -1750,7 +1746,9 @@ def xql_find_value(node_id: str, xpath: str) -> Dict[str, Any]:
     return {
         'success': True,
         'result': {
-            'value': ""
+            'result': {
+                'value': ""
+            }
         }
     }
 
@@ -1770,7 +1768,9 @@ def xql_exists(node_id: str, xpath: str) -> Dict[str, Any]:
         return {
             'success': True,
             'result': {
-                'exists': False
+                'result': {
+                    'exists': False
+                }
             }
         }
 
@@ -1783,7 +1783,9 @@ def xql_exists(node_id: str, xpath: str) -> Dict[str, Any]:
     return {
         'success': True,
         'result': {
-            'exists': exists
+            'result': {
+                'exists': exists
+            }
         }
     }
 

@@ -53,6 +53,7 @@ def load_helper_modules() -> Dict[str, Any]:
     helper_modules = [
         'database',     # Database operations (Oracle, Informix, etc.)
         'xml',          # XML parsing and manipulation
+        'xml_dom_helper', # XML::DOM replacement with full DOM functionality
         'xpath',        # XPath processing with lxml (XML::XPath replacement)
         'http',         # HTTP requests and web operations
         'dates',        # Date parsing and manipulation
