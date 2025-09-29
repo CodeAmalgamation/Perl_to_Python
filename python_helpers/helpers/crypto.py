@@ -3,7 +3,8 @@
 crypto.py - Crypt::CBC replacement using Python cryptography
 
 Provides CBC encryption functionality matching Crypt::CBC usage patterns.
-Supports Blowfish algorithm with PEM key processing and hex encoding.
+Supports Blowfish, AES, Rijndael, DES, and 3DES algorithms with PEM key
+processing and hex encoding.
 """
 
 import os
@@ -23,6 +24,24 @@ except ImportError:
 # Global state for cipher instances and key caching
 CIPHER_INSTANCES = {}
 CACHED_KEYS = {}
+
+def _normalize_cipher_name(cipher: str) -> str:
+    """
+    Normalize cipher names for internal use
+    Maps legacy/alias names to standard implementations
+
+    Args:
+        cipher: Original cipher name
+
+    Returns:
+        Normalized cipher name for internal use
+    """
+    cipher_mapping = {
+        'Rijndael': 'AES',
+        'rijndael': 'AES',
+        'RIJNDAEL': 'AES'
+    }
+    return cipher_mapping.get(cipher, cipher)
 
 def new(key: str = None, cipher: str = "Blowfish", key_file: str = None,
         iv: bytes = None, header: str = "salt", padding_mode: str = "standard") -> Dict[str, Any]:
@@ -65,11 +84,14 @@ def new(key: str = None, cipher: str = "Blowfish", key_file: str = None,
             }
 
         # Validate cipher algorithm
-        if cipher not in ['Blowfish', 'AES', 'DES', '3DES']:
+        if cipher not in ['Blowfish', 'AES', 'Rijndael', 'DES', '3DES']:
             return {
                 'success': False,
-                'error': f'Unsupported cipher algorithm: {cipher}'
+                'error': f'Unsupported cipher algorithm: {cipher}. Supported: Blowfish, AES, Rijndael, DES, 3DES'
             }
+
+        # Normalize cipher name for internal use
+        normalized_cipher = _normalize_cipher_name(cipher)
 
         # Create cipher instance ID
         import uuid
@@ -78,7 +100,8 @@ def new(key: str = None, cipher: str = "Blowfish", key_file: str = None,
         # Store cipher configuration
         CIPHER_INSTANCES[cipher_id] = {
             'key': processed_key,
-            'cipher': cipher,
+            'cipher': normalized_cipher,  # Store normalized cipher for internal use
+            'original_cipher': cipher,    # Keep original for reference
             'iv': iv,
             'header': header,
             'padding_mode': padding_mode,
@@ -133,7 +156,7 @@ def encrypt(cipher_id: str, plaintext: str) -> Dict[str, Any]:
         # Encrypt using specified algorithm
         if config['cipher'] == 'Blowfish':
             encrypted_bytes = _encrypt_blowfish(key_bytes, plaintext.encode('utf-8'))
-        elif config['cipher'] == 'AES':
+        elif config['cipher'] == 'AES':  # Handles both AES and Rijndael
             encrypted_bytes = _encrypt_aes(key_bytes, plaintext.encode('utf-8'))
         else:
             return {
@@ -206,7 +229,7 @@ def decrypt(cipher_id: str, hex_ciphertext: str) -> Dict[str, Any]:
         # Decrypt using specified algorithm
         if config['cipher'] == 'Blowfish':
             decrypted_bytes = _decrypt_blowfish(key_bytes, ciphertext_bytes)
-        elif config['cipher'] == 'AES':
+        elif config['cipher'] == 'AES':  # Handles both AES and Rijndael
             decrypted_bytes = _decrypt_aes(key_bytes, ciphertext_bytes)
         else:
             return {
@@ -313,7 +336,7 @@ def _prepare_key(key_str: str, cipher: str) -> Optional[bytes]:
             elif len(key_bytes) < 4:  # Min 32 bits
                 key_bytes = key_bytes.ljust(4, b'\x00')
         elif cipher == 'AES':
-            # AES requires 16, 24, or 32 bytes
+            # AES/Rijndael requires 16, 24, or 32 bytes
             if len(key_bytes) <= 16:
                 key_bytes = key_bytes.ljust(16, b'\x00')
             elif len(key_bytes) <= 24:
