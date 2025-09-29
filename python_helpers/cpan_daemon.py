@@ -226,6 +226,15 @@ class RequestValidator:
             "database": ["connect", "disconnect", "execute_statement", "fetch_row", "fetch_all",
                         "prepare", "finish_statement", "begin_transaction", "commit", "rollback"],
             "xml_helper": ["xml_in", "xml_out", "escape_xml", "unescape_xml"],
+            "xml_dom_helper": ["create_parser", "parse_string", "parse_file", "get_elements_by_tag_name",
+                              "get_elements_by_tag_name_from_node", "get_attribute", "set_attribute",
+                              "has_attribute", "get_child_nodes", "get_first_child", "get_node_value",
+                              "get_tag_name", "is_element_node", "get_text_contents", "to_string",
+                              "dispose_document", "get_nodelist_length", "get_nodelist_item",
+                              "create_element", "create_text_node", "remove_attribute", "append_child",
+                              "remove_child", "replace_child", "insert_before", "clone_node",
+                              "get_parent_node", "get_module_info", "xql_query", "xql_find_nodes",
+                              "xql_find_value", "xql_exists", "get_document_root"],
             "xpath": ["new", "find", "findnodes", "findvalue", "exists"],
             "http_helper": ["lwp_request", "get", "post", "put", "delete", "head"],
             "datetime_helper": ["format_date", "parse_date", "add_days", "diff_days", "now"],
@@ -1180,6 +1189,7 @@ class CPANBridgeDaemon:
         helper_modules = [
             'database',         # Database operations (Oracle, Informix, etc.)
             'xml_helper',      # XML parsing and manipulation
+            'xml_dom_helper',  # XML::DOM replacement with full DOM functionality
             'xpath',           # XPath processing with lxml
             'http_helper',     # HTTP requests and web operations
             'datetime_helper', # DateTime operations
