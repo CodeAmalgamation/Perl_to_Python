@@ -6,6 +6,8 @@ use Data::Dumper;
 
 # Enable high-performance daemon mode
 $CPANBridge::DAEMON_MODE = 1;
+$CPANBridge::DEBUG_LEVEL = 1;
+
 
 # Use exactly as before - no code changes needed!
 my $bridge = CPANBridge->new();

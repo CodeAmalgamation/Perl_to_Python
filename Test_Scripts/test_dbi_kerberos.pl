@@ -10,6 +10,10 @@ use lib "$FindBin::Bin/..";  # Parent directory for DBIHelper
 $ENV{KRB5_CONFIG} = $ENV{KRB5_CONFIG} || '/etc/krb5.conf';
 $ENV{KRB5CCNAME} = $ENV{KRB5CCNAME} || '/tmp/krb5cc_1000';
 
+# Enable daemon mode (required for CPANBridge)
+$CPANBridge::DAEMON_MODE = 1;
+$CPANBridge::DEBUG_LEVEL = 1;  # Enable debug to see daemon startup
+
 # Test the new system
 use DBIHelper;
 
