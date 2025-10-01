@@ -47,7 +47,7 @@ sub new {
 sub connect {
     my ($class, $dsn, $username, $password, $attr) = @_;
     
-    # Handle DbAccess.pm Informix pattern: DBI->connect($dbi, \%attr)
+    # Handle alternate connection pattern: DBI->connect($dbi, \%attr)
     if (ref($dsn) eq 'HASH') {
         $attr = $dsn;
         $dsn = $username;
@@ -80,17 +80,8 @@ sub connect {
         $self->{PrintError} = $attr->{PrintError} if exists $attr->{PrintError};
     }
     
-    # Detect database type
-    my $db_type = '';
-    if ($dsn =~ m/informix/i) {
-        $db_type = 'informix';
-    } elsif ($dsn =~ m/oracle/i) {
-        $db_type = 'oracle';
-    } else {
-        $self->_set_error("Unrecognized DataBase type");
-        return undef if $self->{RaiseError};
-        return 1;  # Return 1 for FAILURE like your DbAccess.pm
-    }
+    # Database type is always Oracle
+    my $db_type = 'oracle';
     
     # Connect via Python bridge
     my $result = $self->call_python('database', 'connect', {
@@ -848,11 +839,11 @@ DBIHelper - DBI replacement for RHEL 9 migration
 
 =head1 DESCRIPTION
 
-DBIHelper provides a drop-in replacement for DBI that works without CPAN 
-dependencies by using Python drivers underneath. It supports all DBI 
+DBIHelper provides a drop-in replacement for DBI that works without CPAN
+dependencies by using Python drivers underneath. It supports all DBI
 functionality found in your Perl scripts including:
 
-- Oracle and Informix connections
+- Oracle database connections (with password and Kerberos authentication)
 - All fetch methods (fetchrow_array, fetchrow_hashref, etc.)
 - Statement handle attributes (NAME_uc, NUM_OF_FIELDS, rows)
 - Stored procedures with bind parameters
