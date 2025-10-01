@@ -10,6 +10,7 @@ import tempfile
 import json
 import pickle
 import time
+import threading
 from typing import Dict, Any, List, Optional
 
 try:
@@ -24,6 +25,10 @@ _statements = {}
 # Persistent storage for connections across bridge calls
 _PERSISTENCE_DIR = os.path.join(tempfile.gettempdir(), 'cpan_bridge_db')
 _CONNECTION_TIMEOUT = 1800  # 30 minutes
+
+# Global Oracle thick client initialization state (for Kerberos)
+_ORACLE_THICK_CLIENT_INITIALIZED = False
+_ORACLE_THICK_CLIENT_INIT_LOCK = threading.Lock()
 
 def _simple_encrypt(text: str) -> str:
     """Simple XOR encryption for password storage (not production-grade)"""
@@ -54,19 +59,198 @@ def _ensure_persistence_dir():
     if not os.path.exists(_PERSISTENCE_DIR):
         os.makedirs(_PERSISTENCE_DIR, mode=0o700)
 
-def _save_connection_metadata(connection_id: str, metadata: Dict[str, Any], password: str = ''):
+def _ensure_oracle_thick_client() -> Dict[str, Any]:
+    """
+    Ensure Oracle thick client is initialized (required for Kerberos)
+
+    This should be called once globally before any Kerberos connections.
+    Thread-safe initialization.
+
+    Returns:
+        Dict with success status
+    """
+    global _ORACLE_THICK_CLIENT_INITIALIZED
+
+    with _ORACLE_THICK_CLIENT_INIT_LOCK:
+        if _ORACLE_THICK_CLIENT_INITIALIZED:
+            return {
+                'success': True,
+                'message': 'Oracle thick client already initialized'
+            }
+
+        try:
+            # Initialize Oracle thick client (needed for external auth)
+            oracledb.init_oracle_client()
+            _ORACLE_THICK_CLIENT_INITIALIZED = True
+
+            return {
+                'success': True,
+                'message': 'Oracle thick client initialized successfully'
+            }
+        except Exception as e:
+            error_msg = str(e)
+
+            # Provide helpful error messages
+            if 'cannot be used in thin mode' in error_msg.lower():
+                return {
+                    'success': False,
+                    'error': 'Oracle thick client initialization failed - thick mode required for Kerberos'
+                }
+            else:
+                return {
+                    'success': False,
+                    'error': f'Oracle thick client initialization failed: {error_msg}'
+                }
+
+def _validate_kerberos_environment() -> Dict[str, Any]:
+    """
+    Validate Kerberos environment variables
+
+    Checks that KRB5_CONFIG and KRB5CCNAME are set and point to existing files.
+    This matches the POC validation logic.
+
+    Returns:
+        Dict with success status and environment info
+    """
+    krb5_config = os.getenv("KRB5_CONFIG")
+    krb5_ccname = os.getenv("KRB5CCNAME")
+
+    errors = []
+
+    # Validate KRB5_CONFIG
+    if not krb5_config:
+        errors.append("KRB5_CONFIG environment variable not set")
+    elif not os.path.exists(krb5_config):
+        errors.append(f"KRB5_CONFIG file does not exist: {krb5_config}")
+
+    # Validate KRB5CCNAME
+    if not krb5_ccname:
+        errors.append("KRB5CCNAME environment variable not set")
+    elif not os.path.exists(krb5_ccname):
+        errors.append(f"KRB5CCNAME file does not exist: {krb5_ccname}")
+
+    if errors:
+        return {
+            'success': False,
+            'error': 'Kerberos environment validation failed',
+            'details': errors,
+            'help': (
+                "To use Kerberos authentication:\n"
+                "1. Ensure you have a valid Kerberos ticket (run 'kinit')\n"
+                "2. Set KRB5_CONFIG to your krb5.conf path\n"
+                "3. Set KRB5CCNAME to your credential cache path\n"
+                "Example:\n"
+                "  export KRB5_CONFIG=/etc/krb5.conf\n"
+                "  export KRB5CCNAME=/tmp/krb5cc_1000"
+            )
+        }
+
+    return {
+        'success': True,
+        'krb5_config': krb5_config,
+        'krb5_ccname': krb5_ccname,
+        'message': 'Kerberos environment validated successfully'
+    }
+
+def _connect_oracle_kerberos(connection_params: Dict[str, str],
+                             username: str = '',
+                             options: Dict = None) -> Any:
+    """
+    Connect to Oracle database using Kerberos authentication
+
+    This matches the POC implementation:
+    1. Validates Kerberos environment (KRB5_CONFIG, KRB5CCNAME)
+    2. Ensures Oracle thick client is initialized
+    3. Connects with externalauth=True
+
+    Args:
+        connection_params: Parsed DSN parameters
+        username: Optional username (usually not needed for Kerberos)
+        options: Connection options
+
+    Returns:
+        Oracle connection object
+
+    Raises:
+        RuntimeError: If Kerberos setup is invalid or connection fails
+    """
+    # Step 1: Validate Kerberos environment (from POC)
+    env_check = _validate_kerberos_environment()
+    if not env_check['success']:
+        raise RuntimeError(
+            f"{env_check['error']}: {', '.join(env_check['details'])}\n\n"
+            f"{env_check['help']}"
+        )
+
+    # Step 2: Ensure Oracle thick client is initialized (from POC)
+    thick_client_init = _ensure_oracle_thick_client()
+    if not thick_client_init['success']:
+        raise RuntimeError(
+            f"Cannot use Kerberos authentication: {thick_client_init['error']}\n"
+            "Kerberos requires Oracle thick client mode."
+        )
+
+    # Step 3: Build connection string (same format as POC: host:port/service_name)
+    if 'service_name' in connection_params:
+        connect_string = f"{connection_params.get('host', 'localhost')}:{connection_params.get('port', 1521)}/{connection_params['service_name']}"
+    elif 'sid' in connection_params:
+        connect_string = f"{connection_params.get('host', 'localhost')}:{connection_params.get('port', 1521)}/{connection_params['sid']}"
+    elif 'tns' in connection_params:
+        connect_string = connection_params['tns']
+    else:
+        raise RuntimeError("Invalid DSN for Kerberos connection - need host:port/service_name format")
+
+    try:
+        # Step 4: Connect with externalauth=True (from POC)
+        conn = oracledb.connect(
+            dsn=connect_string,
+            externalauth=True  # This is the key for Kerberos
+        )
+
+        return conn
+
+    except Exception as e:
+        error_msg = str(e).lower()
+
+        # Provide helpful error messages for common Kerberos issues
+        if 'ora-01017' in error_msg or 'invalid username/password' in error_msg:
+            raise RuntimeError(
+                "Kerberos authentication failed - ORA-01017\n"
+                "Possible causes:\n"
+                "1. No valid Kerberos ticket (run 'kinit username')\n"
+                "2. Ticket expired (run 'kinit -R' to renew)\n"
+                "3. Oracle database not configured for Kerberos\n"
+                "4. Check 'klist' to verify ticket status"
+            )
+        elif 'ora-12641' in error_msg:
+            raise RuntimeError(
+                "Kerberos authentication failed - ORA-12641\n"
+                "Authentication service not initialized\n"
+                "Check Oracle sqlnet.ora: AUTHENTICATION_SERVICES=(KERBEROS5)"
+            )
+        elif 'ora-12649' in error_msg:
+            raise RuntimeError(
+                "Kerberos authentication failed - ORA-12649\n"
+                "Unknown encryption/checksum type\n"
+                "Kerberos encryption type may not be supported by Oracle"
+            )
+        else:
+            raise RuntimeError(f"Kerberos connection failed: {str(e)}")
+
+def _save_connection_metadata(connection_id: str, metadata: Dict[str, Any], password: str = '', auth_mode: str = 'password'):
     """Save connection metadata to persistent storage"""
     try:
         _ensure_persistence_dir()
         metadata_file = os.path.join(_PERSISTENCE_DIR, f"{connection_id}.json")
 
-        # Store connection metadata including encrypted password
+        # Store connection metadata including encrypted password (if any)
         persistent_metadata = {
             'connection_id': connection_id,
             'type': metadata.get('type'),
             'dsn': metadata.get('dsn'),
             'username': metadata.get('username'),
-            'password': _simple_encrypt(password) if password else '',  # Simple encryption
+            'password': _simple_encrypt(password) if password and auth_mode == 'password' else '',
+            'auth_mode': auth_mode,  # Store authentication mode
             'autocommit': metadata.get('autocommit'),
             'raise_error': metadata.get('raise_error'),
             'print_error': metadata.get('print_error'),
@@ -120,18 +304,24 @@ def _restore_connection_from_metadata(metadata: Dict[str, Any]) -> Optional[Any]
     try:
         # Recreate the Oracle connection using stored metadata
         connection_params = _parse_oracle_dsn(metadata['dsn'])
+        auth_mode = metadata.get('auth_mode', 'password')
 
-        # Decrypt stored password
-        password = _simple_decrypt(metadata.get('password', ''))
+        # Restore based on authentication mode
+        if auth_mode == 'kerberos':
+            # For Kerberos, reconnect using current ticket
+            # No password needed
+            conn = _connect_oracle_kerberos(connection_params, metadata['username'])
+        else:  # password (default)
+            # Decrypt stored password
+            password = _simple_decrypt(metadata.get('password', ''))
 
-        # Re-establish Oracle connection
-        options = {
-            'AutoCommit': metadata.get('autocommit', True),
-            'RaiseError': metadata.get('raise_error', False),
-            'PrintError': metadata.get('print_error', True)
-        }
-
-        conn = _connect_oracle(connection_params, metadata['username'], password, options)
+            # Re-establish Oracle connection
+            options = {
+                'AutoCommit': metadata.get('autocommit', True),
+                'RaiseError': metadata.get('raise_error', False),
+                'PrintError': metadata.get('print_error', True)
+            }
+            conn = _connect_oracle(connection_params, metadata['username'], password, options)
 
         return conn
 
@@ -281,10 +471,39 @@ def _ensure_connection_available(connection_id: str) -> Dict[str, Any]:
 
     return {'success': True, 'debug_info': debug_info}
 
-def connect(dsn: str, username: str = '', password: str = '', options: Dict = None, db_type: str = '') -> Dict[str, Any]:
-    """Connect to Oracle database using oracledb driver"""
+def connect(dsn: str, username: str = '', password: str = '', options: Dict = None, db_type: str = '', auth_mode: str = 'auto') -> Dict[str, Any]:
+    """
+    Connect to Oracle database using oracledb driver
+
+    Supports two authentication modes:
+    - 'password': Traditional username/password
+    - 'kerberos': Kerberos ticket-based authentication
+    - 'auto': Auto-detect based on environment variables (default)
+
+    Auto-detection logic:
+    - If KRB5_CONFIG and KRB5CCNAME are both set -> Kerberos
+    - Otherwise -> Password authentication
+
+    For Kerberos, set environment variables:
+    - KRB5_CONFIG: Path to krb5.conf
+    - KRB5CCNAME: Path to credential cache
+    """
     try:
         connection_id = str(uuid.uuid4())
+
+        # Auto-detect authentication mode based on environment variables
+        actual_auth_mode = auth_mode
+        if auth_mode == 'auto':
+            # Check if Kerberos environment variables are set
+            krb5_config = os.getenv("KRB5_CONFIG")
+            krb5_ccname = os.getenv("KRB5CCNAME")
+
+            if krb5_config and krb5_ccname:
+                # Both Kerberos env vars present -> use Kerberos
+                actual_auth_mode = 'kerberos'
+            else:
+                # Kerberos env vars missing -> use password
+                actual_auth_mode = 'password'
 
         # Handle Oracle TNS-in-username pattern: "dbi:Oracle:" with "user@TNS_NAME"
         actual_username = username
@@ -297,9 +516,12 @@ def connect(dsn: str, username: str = '', password: str = '', options: Dict = No
         # Parse Oracle connection details
         connection_params = _parse_oracle_dsn(dsn)
 
-        # Connect to Oracle database
-        conn = _connect_oracle(connection_params, actual_username, password, options)
-        
+        # Route to appropriate authentication method
+        if actual_auth_mode == 'kerberos':
+            conn = _connect_oracle_kerberos(connection_params, actual_username, options)
+        else:  # password (default)
+            conn = _connect_oracle(connection_params, actual_username, password, options)
+
         if not conn:
             raise RuntimeError("Failed to establish Oracle database connection")
 
@@ -309,6 +531,7 @@ def connect(dsn: str, username: str = '', password: str = '', options: Dict = No
             'type': 'oracle',
             'dsn': dsn,
             'username': actual_username,
+            'auth_mode': actual_auth_mode,  # Track auth mode
             'autocommit': options.get('AutoCommit', True) if options else True,
             'raise_error': options.get('RaiseError', False) if options else False,
             'print_error': options.get('PrintError', True) if options else True,
@@ -318,15 +541,21 @@ def connect(dsn: str, username: str = '', password: str = '', options: Dict = No
         # Configure autocommit
         conn.autocommit = connection_metadata['autocommit']
 
-        # Save connection metadata to persistent storage for cross-process access
-        _save_connection_metadata(connection_id, connection_metadata, password)
+        # Save connection metadata to persistent storage (only save password for password auth)
+        _save_connection_metadata(
+            connection_id,
+            connection_metadata,
+            password if actual_auth_mode == 'password' else '',
+            actual_auth_mode
+        )
 
         return {
             'success': True,
             'connection_id': connection_id,
-            'db_type': 'oracle'
+            'db_type': 'oracle',
+            'auth_mode': actual_auth_mode
         }
-        
+
     except Exception as e:
         return {
             'success': False,
