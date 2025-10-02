@@ -623,6 +623,37 @@ def _parse_oracle_dsn(dsn: str) -> Dict[str, str]:
     return params
 
 
+def _convert_placeholders_to_oracle(sql: str) -> str:
+    """Convert DBI-style ? placeholders to Oracle-style :1, :2, etc."""
+    counter = 1
+    result = []
+    i = 0
+    in_string = False
+    string_char = None
+
+    while i < len(sql):
+        char = sql[i]
+
+        # Track string literals to avoid replacing ? inside strings
+        if char in ("'", '"'):
+            if not in_string:
+                in_string = True
+                string_char = char
+            elif char == string_char:
+                in_string = False
+                string_char = None
+
+        # Replace ? with :N outside of strings
+        if char == '?' and not in_string:
+            result.append(f':{counter}')
+            counter += 1
+        else:
+            result.append(char)
+
+        i += 1
+
+    return ''.join(result)
+
 def prepare(connection_id: str, sql: str) -> Dict[str, Any]:
     """Prepare SQL statement"""
     try:
@@ -667,10 +698,14 @@ def prepare(connection_id: str, sql: str) -> Dict[str, Any]:
         statement_id = str(uuid.uuid4())
         conn_info = _connections[connection_id]
 
+        # Convert DBI-style ? placeholders to Oracle-style :1, :2, etc.
+        oracle_sql = _convert_placeholders_to_oracle(sql)
+
         # Store statement info (cursor will be created on execute)
         statement_metadata = {
             'connection_id': connection_id,
-            'sql': sql,
+            'sql': oracle_sql,  # Store converted SQL
+            'original_sql': sql,  # Keep original for reference
             'cursor': None,
             'executed': False,
             'finished': False
