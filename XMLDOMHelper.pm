@@ -27,7 +27,7 @@ sub new {
     }
 
     my $self = {
-        parser_id => $result->{result}->{result}->{parser_id},
+        parser_id => $result->{result}->{parser_id},
         options => \%options
     };
 
@@ -52,8 +52,8 @@ sub parse {
     }
 
     return XMLDOMHelper::Document->new(
-        $result->{result}->{result}->{document_id},
-        $result->{result}->{result}->{root_node_id}
+        $result->{result}->{document_id},
+        $result->{result}->{root_node_id}
     );
 }
 
@@ -98,8 +98,8 @@ sub getElementsByTagName {
     }
 
     return XMLDOMHelper::NodeList->new(
-        $result->{result}->{result}->{nodelist_id},
-        $result->{result}->{result}->{node_ids}
+        $result->{result}->{nodelist_id},
+        $result->{result}->{node_ids}
     );
 }
 
@@ -139,7 +139,7 @@ sub createElement {
         die "createElement failed: " . $result->{error};
     }
 
-    return XMLDOMHelper::Element->new($result->{result}->{result}->{node_id});
+    return XMLDOMHelper::Element->new($result->{result}->{node_id});
 }
 
 sub createTextNode {
@@ -157,7 +157,7 @@ sub createTextNode {
         die "createTextNode failed: " . $result->{error};
     }
 
-    return XMLDOMHelper::Element->new($result->{result}->{result}->{node_id});
+    return XMLDOMHelper::Element->new($result->{result}->{node_id});
 }
 
 sub toString {
@@ -175,7 +175,7 @@ sub toString {
         return "";  # Return empty string on error for compatibility
     }
 
-    return $result->{result}->{result}->{xml_string} || "";
+    return $result->{result}->{xml_string} || "";
 }
 
 sub getDocumentElement {
@@ -299,7 +299,7 @@ sub getAttribute {
         return "";  # Return empty string on error for compatibility
     }
 
-    return $result->{result}->{result}->{value} || "";
+    return $result->{result}->{value} || "";
 }
 
 sub setAttribute {
@@ -343,7 +343,7 @@ sub hasAttribute {
         return 0;  # Return false on error
     }
 
-    return $result->{result}->{result}->{has_attribute} ? 1 : 0;
+    return $result->{result}->{has_attribute} ? 1 : 0;
 }
 
 sub removeAttribute {
@@ -378,8 +378,8 @@ sub getChildNodes {
     }
 
     return XMLDOMHelper::NodeList->new(
-        $result->{result}->{result}->{nodelist_id},
-        $result->{result}->{result}->{node_ids}
+        $result->{result}->{nodelist_id},
+        $result->{result}->{node_ids}
     );
 }
 
@@ -401,8 +401,8 @@ sub getElementsByTagName {
     }
 
     return XMLDOMHelper::NodeList->new(
-        $result->{result}->{result}->{nodelist_id},
-        $result->{result}->{result}->{node_ids}
+        $result->{result}->{nodelist_id},
+        $result->{result}->{node_ids}
     );
 }
 
@@ -417,7 +417,7 @@ sub getNodeValue {
         return "";  # Return empty string on error
     }
 
-    return $result->{result}->{result}->{value} || "";
+    return $result->{result}->{value} || "";
 }
 
 sub getTagName {
@@ -431,7 +431,7 @@ sub getTagName {
         return "";  # Return empty string on error
     }
 
-    return $result->{result}->{result}->{tag_name} || "";
+    return $result->{result}->{tag_name} || "";
 }
 
 sub appendChild {
@@ -541,7 +541,7 @@ sub cloneNode {
         die "cloneNode failed: " . $result->{error};
     }
 
-    return XMLDOMHelper::Element->new($result->{result}->{result}->{node_id});
+    return XMLDOMHelper::Element->new($result->{result}->{node_id});
 }
 
 sub getFirstChild {
@@ -555,7 +555,7 @@ sub getFirstChild {
         return undef;  # Return undef on error
     }
 
-    my $child_node_id = $result->{result}->{result}->{node_id};
+    my $child_node_id = $result->{result}->{node_id};
     return $child_node_id ? XMLDOMHelper::Element->new($child_node_id) : undef;
 }
 
@@ -570,7 +570,7 @@ sub getParentNode {
         return undef;  # Return undef on error
     }
 
-    my $parent_node_id = $result->{result}->{result}->{node_id};
+    my $parent_node_id = $result->{result}->{node_id};
     return $parent_node_id ? XMLDOMHelper::Element->new($parent_node_id) : undef;
 }
 
@@ -708,7 +708,7 @@ sub getLength {
         });
 
         if ($result->{success}) {
-            return $result->{result}->{result}->{length};
+            return $result->{result}->{length};
         }
     }
 
@@ -731,7 +731,7 @@ sub item {
         });
 
         if ($result->{success}) {
-            my $node_id = $result->{result}->{result}->{node_id};
+            my $node_id = $result->{result}->{node_id};
             return $node_id ? XMLDOMHelper::Element->new($node_id) : undef;
         }
     }
