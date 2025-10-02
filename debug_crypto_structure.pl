@@ -28,12 +28,12 @@ if ($result->{success}) {
     if (exists $result->{result}) {
         print "result->{result}->{success}: " . ($result->{result}->{success} ? "true" : "false") . "\n";
 
-        if (exists $result->{result}->{result}) {
+        if (exists $result->{result}) {
             print "result->{result}->{result} exists: yes\n";
             print "cipher_id location: result->{result}->{result}->{cipher_id}\n";
 
-            if (exists $result->{result}->{result}->{cipher_id}) {
-                print "Cipher ID: " . $result->{result}->{result}->{cipher_id} . "\n";
+            if (exists $result->{result}->{cipher_id}) {
+                print "Cipher ID: " . $result->{result}->{cipher_id} . "\n";
             }
         }
     }

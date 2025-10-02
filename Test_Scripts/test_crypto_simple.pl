@@ -23,7 +23,7 @@ use Data::Dumper;
 print Dumper($result);
 
 if ($result->{success}) {
-    my $cipher_id = $result->{result}->{result}->{cipher_id};
+    my $cipher_id = $result->{result}->{cipher_id};
     print "\n✅ Success! Cipher ID: $cipher_id\n";
 
     # Test encryption

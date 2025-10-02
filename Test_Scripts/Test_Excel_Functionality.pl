@@ -21,8 +21,8 @@ sub test_excel_mode {
 
     my ($workbook_id, $library);
     if ($result->{success}) {
-        $workbook_id = $result->{result}->{result}->{workbook_id};
-        $library = $result->{result}->{result}->{library};
+        $workbook_id = $result->{result}->{workbook_id};
+        $library = $result->{result}->{library};
         print "Create workbook: PASS (ID: $workbook_id, Library: $library)\n";
     } else {
         print "Create workbook: FAIL - " . $result->{error} . "\n";
@@ -37,7 +37,7 @@ sub test_excel_mode {
 
     my $worksheet_id;
     if ($result->{success}) {
-        $worksheet_id = $result->{result}->{result}->{worksheet_id};
+        $worksheet_id = $result->{result}->{worksheet_id};
         print "Add worksheet: PASS (ID: $worksheet_id)\n";
     } else {
         print "Add worksheet: FAIL - " . $result->{error} . "\n";
