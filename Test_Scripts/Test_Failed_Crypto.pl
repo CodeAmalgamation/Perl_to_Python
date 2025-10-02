@@ -236,7 +236,7 @@ $result = $bridge->call_python('crypto', 'encrypt', {
 
   cipher_id => $test_cipher_id,
 
-  plaintext => $newlines_data
+  plaintext_hex => unpack('H*', $newlines_data)
 
 });
 
@@ -262,7 +262,8 @@ if ($result->{success}) {
 
   if ($result->{success}) {
 
-    my $decrypted = $result->{result}->{decrypted};
+    my $decrypted_hex = $result->{result}->{decrypted_hex};
+    my $decrypted = pack('H*', $decrypted_hex);
 
     print "  Decrypted data: " . join("", map { sprintf("\\x%02x", ord($_)) } split //, $decrypted) . "\n";
 
@@ -353,7 +354,7 @@ $result = $bridge->call_python('crypto', 'encrypt', {
 
   cipher_id => $test_cipher_id,
 
-  plaintext => $null_data
+  plaintext_hex => unpack('H*', $null_data)
 
 });
 
@@ -379,7 +380,8 @@ if ($result->{success}) {
 
   if ($result->{success}) {
 
-    my $decrypted = $result->{result}->{decrypted};
+    my $decrypted_hex = $result->{result}->{decrypted_hex};
+    my $decrypted = pack('H*', $decrypted_hex);
 
     print "  Decrypted data: " . join("", map { sprintf("\\x%02x", ord($_)) } split //, $decrypted) . "\n";
 
@@ -453,11 +455,14 @@ print "  UTF-8 bytes: " . join("", map { sprintf("\\x%02x", ord($_)) } split //,
 
 # Try encryption
 
+# Unicode must be UTF-8 encoded before encryption
+my $utf8_encoded = encode('UTF-8', $unicode_text);
+
 $result = $bridge->call_python('crypto', 'encrypt', {
 
   cipher_id => $test_cipher_id,
 
-  plaintext => $unicode_text
+  plaintext_hex => unpack('H*', $utf8_encoded)
 
 });
 
@@ -491,7 +496,8 @@ if ($result->{success}) {
 
   if ($result->{success}) {
 
-    my $decrypted = $result->{result}->{decrypted};
+    my $decrypted_hex = $result->{result}->{decrypted_hex};
+    my $decrypted = pack('H*', $decrypted_hex);
 
     print "  ✅ Decryption successful: '$decrypted'\n";
 
@@ -505,47 +511,33 @@ if ($result->{success}) {
 
 
 
-    # Method 1: Direct comparison
+    # Decrypt returns raw bytes, must decode UTF-8 to get Unicode
 
-    if ($decrypted eq $unicode_text) {
+    eval {
 
-      $unicode_success = 1;
+      my $decoded = decode('UTF-8', $decrypted);
 
-      print "  ✅ Direct comparison successful\n";
+      if ($decoded eq $unicode_text) {
 
-    }
+        $unicode_success = 1;
 
-    # Method 2: UTF-8 decode
+        print "  ✅ UTF-8 decode successful - Unicode matches!\n";
 
-    else {
+      } else {
 
-      eval {
+        print "  ❌ UTF-8 decode comparison failed\n";
 
-        my $decoded = decode('UTF-8', $decrypted);
+        print "  Expected: '$unicode_text'\n";
 
-        if ($decoded eq $unicode_text) {
-
-          $unicode_success = 1;
-
-          print "  ✅ UTF-8 decode comparison successful\n";
-
-        } else {
-
-          print "  ❌ UTF-8 decode comparison failed\n";
-
-          print "  Expected: '$unicode_text'\n";
-
-          print "  Got: '$decoded'\n";
-
-        }
-
-      };
-
-      if ($@) {
-
-        print "  ❌ UTF-8 decode failed: $@\n";
+        print "  Got: '$decoded'\n";
 
       }
+
+    };
+
+    if ($@) {
+
+      print "  ❌ UTF-8 decode failed: $@\n";
 
     }
 
@@ -605,7 +597,7 @@ $result = $bridge->call_python('crypto', 'encrypt', {
 
   cipher_id => $test_cipher_id,
 
-  plaintext => $utf8_bytes
+  plaintext_hex => unpack('H*', $utf8_bytes)
 
 });
 
@@ -631,7 +623,8 @@ if ($result->{success}) {
 
   if ($result->{success}) {
 
-    my $decrypted_bytes = $result->{result}->{decrypted};
+    my $decrypted_hex = $result->{result}->{decrypted_hex};
+    my $decrypted_bytes = pack('H*', $decrypted_hex);
 
     print "  ✅ UTF-8 bytes decryption successful\n";
 
