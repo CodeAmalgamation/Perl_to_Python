@@ -35,8 +35,8 @@ if (!$result->{success}) {
     exit 1;
 }
 
-my $conn_id = $result->{result}->{connection_id};
-my $auth_mode = $result->{result}->{auth_mode};
+my $conn_id = $result->{connection_id};
+my $auth_mode = $result->{auth_mode};
 
 print "✅ Connected!\n";
 print "  Connection ID: $conn_id\n";
