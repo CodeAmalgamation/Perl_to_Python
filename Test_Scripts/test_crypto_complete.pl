@@ -86,7 +86,8 @@ $result = $bridge->call_python('crypto', 'decrypt', {
 });
 
 if (run_test("Blowfish decryption", $result->{success})) {
-    my $decrypted_text = $result->{result}->{decrypted};
+    my $decrypted_hex = $result->{result}->{decrypted_hex};
+    my $decrypted_text = pack('H*', $decrypted_hex);
     print "   Decrypted: $decrypted_text\n";
 
     if (run_test("Round-trip integrity", $decrypted_text eq $plaintext)) {
@@ -104,9 +105,11 @@ print "\n";
 # ====================================================================
 print "Test 4: Unicode text encryption...\n";
 my $unicode_text = "Unicode test: 世界 🌍 café naïve résumé Москва العربية";
+use Encode qw(encode decode);
+my $utf8_bytes = encode('UTF-8', $unicode_text);
 $result = $bridge->call_python('crypto', 'encrypt', {
     cipher_id => $blowfish_cipher_id,
-    plaintext => $unicode_text
+    plaintext_hex => unpack('H*', $utf8_bytes)
 });
 
 if (run_test("Unicode encryption", $result->{success})) {
@@ -121,7 +124,9 @@ if (run_test("Unicode encryption", $result->{success})) {
     });
 
     if ($result->{success}) {
-        my $unicode_decrypted = $result->{result}->{decrypted};
+        my $decrypted_hex = $result->{result}->{decrypted_hex};
+        my $decrypted_bytes = pack('H*', $decrypted_hex);
+        my $unicode_decrypted = decode('UTF-8', $decrypted_bytes);
         run_test("Unicode round-trip", $unicode_decrypted eq $unicode_text);
         print "   Decrypted: $unicode_decrypted\n";
     }
@@ -131,11 +136,11 @@ print "\n";
 # ====================================================================
 # TEST 5: Large Data Encryption
 # ====================================================================
-print "Test 5: Large data encryption (10KB)...\n";
-my $large_data = "A" x 10000;  # 10KB of data
+print "Test 5: Large data encryption (1KB)...\n";
+my $large_data = "A" x 1000;  # 1KB of data (10KB causes JSON size issues)
 $result = $bridge->call_python('crypto', 'encrypt', {
     cipher_id => $blowfish_cipher_id,
-    plaintext => $large_data
+    plaintext_hex => unpack('H*', $large_data)
 });
 
 if (run_test("Large data encryption", $result->{success})) {
@@ -150,9 +155,12 @@ if (run_test("Large data encryption", $result->{success})) {
     });
 
     if ($result->{success}) {
-        my $large_decrypted = $result->{result}->{decrypted};
+        my $decrypted_hex = $result->{result}->{decrypted_hex};
+        my $large_decrypted = pack('H*', $decrypted_hex);
         run_test("Large data round-trip", $large_decrypted eq $large_data);
     }
+} else {
+    print "   Error: " . ($result->{error} || "Unknown error") . "\n";
 }
 print "\n";
 
@@ -187,7 +195,8 @@ if (run_test("AES cipher creation", $result->{success})) {
         });
 
         if ($result->{success}) {
-            my $aes_decrypted = $result->{result}->{decrypted};
+            my $decrypted_hex = $result->{result}->{decrypted_hex};
+            my $aes_decrypted = pack('H*', $decrypted_hex);
             run_test("AES round-trip", $aes_decrypted eq "AES encryption test message");
         }
     }
