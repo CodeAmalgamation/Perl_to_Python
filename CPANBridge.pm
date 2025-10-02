@@ -47,7 +47,10 @@ sub _get_default_socket_path {
 
 sub new {
     my ($class, %args) = @_;
-    
+
+    # Handle case where new() is called on an object instead of a class
+    $class = ref($class) || $class;
+
     my $self = {
         debug => $args{debug} || $DEBUG_LEVEL,
         timeout => $args{timeout} || $TIMEOUT,
@@ -57,7 +60,7 @@ sub new {
         last_python_output => undef,
         performance_stats => {},
     };
-    
+
     bless $self, $class;
     
     # Initialize Python bridge script path if not set
