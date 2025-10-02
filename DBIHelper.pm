@@ -106,14 +106,11 @@ sub connect {
     }
     
     # Success - configure handle
-    # Extract connection_id from nested result structure (CPANBridge wraps results)
-    my $connection_id;
-    if ($result->{result} && $result->{result}->{connection_id}) {
-        $connection_id = $result->{result}->{connection_id};
-    } elsif ($result->{connection_id}) {
-        $connection_id = $result->{connection_id};
-    } else {
-        $self->_set_error("Connection ID not found in result structure");
+    # CPANBridge now returns unwrapped results directly (Issue #1 fix)
+    my $connection_id = $result->{connection_id};
+
+    unless ($connection_id) {
+        $self->_set_error("Connection ID not found in result");
         return 1;  # Return 1 for FAILURE
     }
 
@@ -147,14 +144,11 @@ sub prepare {
         return undef;
     }
 
-    # Extract statement_id from nested result structure (CPANBridge wraps results)
-    my $statement_id;
-    if ($result->{result} && $result->{result}->{statement_id}) {
-        $statement_id = $result->{result}->{statement_id};
-    } elsif ($result->{statement_id}) {
-        $statement_id = $result->{statement_id};
-    } else {
-        $self->_set_error("Statement ID not found in result structure");
+    # CPANBridge now returns unwrapped results directly (Issue #1 fix)
+    my $statement_id = $result->{statement_id};
+
+    unless ($statement_id) {
+        $self->_set_error("Statement ID not found in result");
         return undef;
     }
 
@@ -196,15 +190,8 @@ sub do {
         return undef;
     }
 
-    # Extract rows_affected from nested result structure (CPANBridge wraps results)
-    my $rows_affected;
-    if ($result->{result} && defined $result->{result}->{rows_affected}) {
-        $rows_affected = $result->{result}->{rows_affected};
-    } elsif (defined $result->{rows_affected}) {
-        $rows_affected = $result->{rows_affected};
-    } else {
-        $rows_affected = 0;  # Default to 0 if not found
-    }
+    # CPANBridge now returns unwrapped results directly (Issue #1 fix)
+    my $rows_affected = $result->{rows_affected} // 0;
 
     return $rows_affected;
 }
@@ -482,13 +469,8 @@ sub execute {
     
     $self->{executed} = 1;
     
-    # Set column metadata from result (handle nested structure)
-    my $column_info;
-    if ($result->{result} && $result->{result}->{column_info}) {
-        $column_info = $result->{result}->{column_info};
-    } elsif ($result->{column_info}) {
-        $column_info = $result->{column_info};
-    }
+    # Set column metadata from result (CPANBridge now unwraps - Issue #1 fix)
+    my $column_info = $result->{column_info};
 
     if ($column_info) {
         $self->{NUM_OF_FIELDS} = $column_info->{count} || 0;
@@ -503,15 +485,8 @@ sub execute {
         $self->{NAME_uc} = [];
     }
 
-    # Set row count (handle nested structure)
-    my $rows_affected;
-    if ($result->{result} && defined $result->{result}->{rows_affected}) {
-        $rows_affected = $result->{result}->{rows_affected};
-    } elsif (defined $result->{rows_affected}) {
-        $rows_affected = $result->{rows_affected};
-    } else {
-        $rows_affected = 0;
-    }
+    # Set row count (CPANBridge now unwraps - Issue #1 fix)
+    my $rows_affected = $result->{rows_affected} // 0;
     $self->{rows} = $rows_affected;
 
     # Return DBI-compatible value
@@ -553,13 +528,10 @@ sub fetchrow_array {
         return ();
     }
 
-    # Extract row data from nested result structure (CPANBridge wraps results)
-    my $row_data;
-    if ($result->{result} && $result->{result}->{row}) {
-        $row_data = $result->{result}->{row};
-    } elsif ($result->{row}) {
-        $row_data = $result->{row};
-    } else {
+    # CPANBridge now unwraps results directly (Issue #1 fix)
+    my $row_data = $result->{row};
+
+    unless ($row_data) {
         $self->{finished} = 1;
         return ();
     }
@@ -593,13 +565,10 @@ sub fetchrow_arrayref {
         return undef;
     }
 
-    # Extract row data from nested result structure (CPANBridge wraps results)
-    my $row_data;
-    if ($result->{result} && $result->{result}->{row}) {
-        $row_data = $result->{result}->{row};
-    } elsif ($result->{row}) {
-        $row_data = $result->{row};
-    } else {
+    # CPANBridge now unwraps results directly (Issue #1 fix)
+    my $row_data = $result->{row};
+
+    unless ($row_data) {
         $self->{finished} = 1;
         return undef;
     }
@@ -631,13 +600,10 @@ sub fetchrow_hashref {
         return undef;
     }
 
-    # Extract row data from nested result structure (CPANBridge wraps results)
-    my $row_data;
-    if ($result->{result} && $result->{result}->{row}) {
-        $row_data = $result->{result}->{row};
-    } elsif ($result->{row}) {
-        $row_data = $result->{row};
-    } else {
+    # CPANBridge now unwraps results directly (Issue #1 fix)
+    my $row_data = $result->{row};
+
+    unless ($row_data) {
         $self->{finished} = 1;
         return undef;
     }
@@ -672,15 +638,8 @@ sub fetchall_arrayref {
     
     $self->{finished} = 1;
 
-    # Extract rows from nested result structure (CPANBridge wraps results)
-    my $rows;
-    if ($result->{result} && $result->{result}->{rows}) {
-        $rows = $result->{result}->{rows};
-    } elsif ($result->{rows}) {
-        $rows = $result->{rows};
-    } else {
-        $rows = [];
-    }
+    # CPANBridge now unwraps results directly (Issue #1 fix)
+    my $rows = $result->{rows} // [];
 
     $self->{rows} = scalar @$rows;
     
