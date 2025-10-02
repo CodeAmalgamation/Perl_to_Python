@@ -1083,35 +1083,62 @@ def fetch_all(connection_id: str, statement_id: str, format: str = 'array') -> D
         }
 
 def execute_immediate(connection_id: str, sql: str, bind_values: List = None) -> Dict[str, Any]:
-    """Execute SQL immediately without preparation"""
+    """Execute SQL immediately without preparation
+
+    Enhanced to fetch and return results for SELECT queries while maintaining
+    backward compatibility for DML statements (INSERT, UPDATE, DELETE).
+    """
     try:
         # Ensure connection is available (restore if needed)
         conn_result = _ensure_connection_available(connection_id)
         if not conn_result['success']:
             return conn_result
-        
+
         conn_info = _connections[connection_id]
         conn = conn_info['connection']
         cursor = conn.cursor()
-        
+
+        # Execute SQL
         if bind_values:
             cursor.execute(sql, bind_values)
         else:
             cursor.execute(sql)
-        
-        rows_affected = getattr(cursor, 'rowcount', 0)
-        
-        # Auto-commit if enabled
-        if conn_info['autocommit']:
-            conn.commit()
-        
+
+        # Detect SQL statement type
+        sql_upper = sql.strip().upper()
+        is_select = sql_upper.startswith('SELECT') or sql_upper.startswith('WITH')
+
+        response = {'success': True}
+
+        if is_select:
+            # Fetch results for SELECT queries
+            rows = cursor.fetchall()
+            result_data = [list(row) for row in rows] if rows else []
+
+            # Get column information
+            column_info = None
+            if hasattr(cursor, 'description') and cursor.description:
+                column_info = {
+                    'count': len(cursor.description),
+                    'names': [desc[0] for desc in cursor.description],
+                    'types': [desc[1] if len(desc) > 1 else None for desc in cursor.description]
+                }
+
+            response['rows'] = result_data
+            response['rows_affected'] = len(result_data)
+            response['column_info'] = column_info
+        else:
+            # For DML statements (INSERT, UPDATE, DELETE)
+            rows_affected = getattr(cursor, 'rowcount', 0)
+            response['rows_affected'] = rows_affected
+
+            # Auto-commit if enabled
+            if conn_info['autocommit']:
+                conn.commit()
+
         cursor.close()
-        
-        return {
-            'success': True,
-            'rows_affected': rows_affected
-        }
-        
+        return response
+
     except Exception as e:
         return {
             'success': False,
