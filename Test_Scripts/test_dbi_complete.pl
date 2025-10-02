@@ -28,12 +28,11 @@ print "-" x 80 . "\n";
 print "Test 1: Database Connection (Kerberos)\n";
 print "-" x 80 . "\n";
 
-my $dbh = DBIHelper->new();
-my $connect_result = $dbh->connect($dsn, $username, $password);
+my $dbh = DBIHelper->connect($dsn, $username, $password);
 
-if ($connect_result) {
-    print "❌ FAILED: connect() returned error code: $connect_result\n";
-    print "Error: " . ($dbh->errstr() || "Unknown error") . "\n";
+unless($dbh) {
+    print "❌ FAILED: connect() returned error code: undefined\n";
+    print "Error: Establishing connection. "\n";
     exit 1;
 }
 
