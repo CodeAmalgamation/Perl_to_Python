@@ -47,7 +47,10 @@ sub _get_default_socket_path {
 
 sub new {
     my ($class, %args) = @_;
-    
+
+    # Handle case where new() is called on an object instead of a class
+    $class = ref($class) || $class;
+
     my $self = {
         debug => $args{debug} || $DEBUG_LEVEL,
         timeout => $args{timeout} || $TIMEOUT,
@@ -57,7 +60,7 @@ sub new {
         last_python_output => undef,
         performance_stats => {},
     };
-    
+
     bless $self, $class;
     
     # Initialize Python bridge script path if not set
@@ -158,12 +161,20 @@ sub call_python {
     if ($result && $result->{success}) {
         $self->_debug("Python call successful (${duration}s)");
         $self->{last_error} = undef;
-        return $result;
+
+        # Extract the actual function result from the bridge wrapper
+        # Python bridge returns: {success: true, result: {actual_data}}
+        # We want to return just the inner 'result' field to the caller
+        if (exists $result->{result}) {
+            return $result->{result};  # Return inner result
+        } else {
+            return $result;  # Fallback for compatibility with non-wrapped responses
+        }
     } else {
         my $error = $result ? $result->{error} : "Unknown Python execution error";
         $self->{last_error} = $error;
         $self->_debug("Python call failed: $error");
-        
+
         return {
             success => 0,
             error => $error,

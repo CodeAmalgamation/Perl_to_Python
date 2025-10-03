@@ -77,9 +77,12 @@ sub encrypt {
     croak "Plaintext required for encryption" unless defined $plaintext;
     croak "Cipher not initialized" unless $self->{cipher_id};
 
+    # Convert plaintext to hex to safely preserve binary data (null bytes, newlines, Unicode)
+    my $plaintext_hex = unpack('H*', $plaintext);
+
     my $result = $self->call_python('crypto', 'encrypt', {
         cipher_id => $self->{cipher_id},
-        plaintext => $plaintext
+        plaintext_hex => $plaintext_hex
     });
 
     if (!$result->{success}) {
@@ -109,7 +112,9 @@ sub decrypt {
     }
 
     $self->{last_error} = undef;
-    return $result->{result}->{decrypted};
+
+    # Convert hex result back to binary string
+    return pack('H*', $result->{result}->{decrypted_hex});
 }
 
 # Error handling (if needed for compatibility)

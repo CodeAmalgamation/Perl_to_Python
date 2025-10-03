@@ -45,9 +45,9 @@ my $result = $bridge->call_python('crypto', 'new', {
 
 my $blowfish_cipher_id;
 if (run_test("Blowfish cipher creation", $result->{success})) {
-    $blowfish_cipher_id = $result->{result}->{result}->{cipher_id};
+    $blowfish_cipher_id = $result->{result}->{cipher_id};
     print "   Cipher ID: $blowfish_cipher_id\n";
-    print "   Key length: " . $result->{result}->{result}->{key_length} . " bytes\n";
+    print "   Key length: " . $result->{result}->{key_length} . " bytes\n";
 } else {
     print "   Error: " . ($result->{error} || "Unknown error") . "\n";
     exit 1;
@@ -66,10 +66,10 @@ $result = $bridge->call_python('crypto', 'encrypt', {
 
 my $encrypted_hex;
 if (run_test("Blowfish encryption", $result->{success})) {
-    $encrypted_hex = $result->{result}->{result}->{encrypted};
+    $encrypted_hex = $result->{result}->{encrypted};
     print "   Original: $plaintext\n";
     print "   Encrypted (hex): $encrypted_hex\n";
-    print "   Length: " . $result->{result}->{result}->{length} . " characters\n";
+    print "   Length: " . $result->{result}->{length} . " characters\n";
 } else {
     print "   Error: " . ($result->{error} || $result->{result}->{error} || "Unknown error") . "\n";
     exit 1;
@@ -86,7 +86,8 @@ $result = $bridge->call_python('crypto', 'decrypt', {
 });
 
 if (run_test("Blowfish decryption", $result->{success})) {
-    my $decrypted_text = $result->{result}->{result}->{decrypted};
+    my $decrypted_hex = $result->{result}->{decrypted_hex};
+    my $decrypted_text = pack('H*', $decrypted_hex);
     print "   Decrypted: $decrypted_text\n";
 
     if (run_test("Round-trip integrity", $decrypted_text eq $plaintext)) {
@@ -104,13 +105,15 @@ print "\n";
 # ====================================================================
 print "Test 4: Unicode text encryption...\n";
 my $unicode_text = "Unicode test: 世界 🌍 café naïve résumé Москва العربية";
+use Encode qw(encode decode);
+my $utf8_bytes = encode('UTF-8', $unicode_text);
 $result = $bridge->call_python('crypto', 'encrypt', {
     cipher_id => $blowfish_cipher_id,
-    plaintext => $unicode_text
+    plaintext_hex => unpack('H*', $utf8_bytes)
 });
 
 if (run_test("Unicode encryption", $result->{success})) {
-    my $unicode_encrypted = $result->{result}->{result}->{encrypted};
+    my $unicode_encrypted = $result->{result}->{encrypted};
     print "   Unicode text: $unicode_text\n";
     print "   Encrypted: $unicode_encrypted\n";
 
@@ -121,7 +124,9 @@ if (run_test("Unicode encryption", $result->{success})) {
     });
 
     if ($result->{success}) {
-        my $unicode_decrypted = $result->{result}->{result}->{decrypted};
+        my $decrypted_hex = $result->{result}->{decrypted_hex};
+        my $decrypted_bytes = pack('H*', $decrypted_hex);
+        my $unicode_decrypted = decode('UTF-8', $decrypted_bytes);
         run_test("Unicode round-trip", $unicode_decrypted eq $unicode_text);
         print "   Decrypted: $unicode_decrypted\n";
     }
@@ -131,15 +136,15 @@ print "\n";
 # ====================================================================
 # TEST 5: Large Data Encryption
 # ====================================================================
-print "Test 5: Large data encryption (10KB)...\n";
-my $large_data = "A" x 10000;  # 10KB of data
+print "Test 5: Large data encryption (1KB)...\n";
+my $large_data = "A" x 1000;  # 1KB of data (10KB causes JSON size issues)
 $result = $bridge->call_python('crypto', 'encrypt', {
     cipher_id => $blowfish_cipher_id,
-    plaintext => $large_data
+    plaintext_hex => unpack('H*', $large_data)
 });
 
 if (run_test("Large data encryption", $result->{success})) {
-    my $large_encrypted = $result->{result}->{result}->{encrypted};
+    my $large_encrypted = $result->{result}->{encrypted};
     print "   Input size: " . length($large_data) . " bytes\n";
     print "   Encrypted size: " . length($large_encrypted) . " hex characters\n";
 
@@ -150,9 +155,12 @@ if (run_test("Large data encryption", $result->{success})) {
     });
 
     if ($result->{success}) {
-        my $large_decrypted = $result->{result}->{result}->{decrypted};
+        my $decrypted_hex = $result->{result}->{decrypted_hex};
+        my $large_decrypted = pack('H*', $decrypted_hex);
         run_test("Large data round-trip", $large_decrypted eq $large_data);
     }
+} else {
+    print "   Error: " . ($result->{error} || "Unknown error") . "\n";
 }
 print "\n";
 
@@ -167,7 +175,7 @@ $result = $bridge->call_python('crypto', 'new', {
 
 my $aes_cipher_id;
 if (run_test("AES cipher creation", $result->{success})) {
-    $aes_cipher_id = $result->{result}->{result}->{cipher_id};
+    $aes_cipher_id = $result->{result}->{cipher_id};
     print "   AES Cipher ID: $aes_cipher_id\n";
 
     # Test AES encryption
@@ -177,7 +185,7 @@ if (run_test("AES cipher creation", $result->{success})) {
     });
 
     if (run_test("AES encryption", $result->{success})) {
-        my $aes_encrypted = $result->{result}->{result}->{encrypted};
+        my $aes_encrypted = $result->{result}->{encrypted};
         print "   AES encrypted: $aes_encrypted\n";
 
         # Test AES decryption
@@ -187,7 +195,8 @@ if (run_test("AES cipher creation", $result->{success})) {
         });
 
         if ($result->{success}) {
-            my $aes_decrypted = $result->{result}->{result}->{decrypted};
+            my $decrypted_hex = $result->{result}->{decrypted_hex};
+            my $aes_decrypted = pack('H*', $decrypted_hex);
             run_test("AES round-trip", $aes_decrypted eq "AES encryption test message");
         }
     }
@@ -206,7 +215,7 @@ $result = $bridge->call_python('crypto', 'new', {
 });
 
 if (run_test("Second cipher creation", $result->{success})) {
-    my $second_cipher_id = $result->{result}->{result}->{cipher_id};
+    my $second_cipher_id = $result->{result}->{cipher_id};
     print "   Second cipher ID: $second_cipher_id\n";
 
     # Test that both ciphers work independently

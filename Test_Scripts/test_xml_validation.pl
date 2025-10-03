@@ -20,7 +20,7 @@ sub test_xml_mode {
     });
 
     if ($result->{success}) {
-        my $parsed = $result->{result}->{result};
+        my $parsed = $result->{result};
         if (ref($parsed) eq 'HASH' && $parsed->{item}) {
             print "Parse simple XML: PASS\n";
         } else {
@@ -52,7 +52,7 @@ sub test_xml_mode {
     });
 
     if ($result->{success}) {
-        my $parsed = $result->{result}->{result};
+        my $parsed = $result->{result};
         if (ref($parsed->{book}) eq 'ARRAY' && @{$parsed->{book}} == 2) {
             print "Parse complex XML: PASS\n";
         } else {
@@ -88,7 +88,7 @@ sub test_xml_mode {
     });
 
     if ($result->{success}) {
-        my $generated_xml = $result->{result}->{result};
+        my $generated_xml = $result->{result};
         if ($generated_xml =~ /<data>/ && $generated_xml =~ /<user.*id="1"/) {
             print "Generate XML: PASS\n";
         } else {
@@ -138,7 +138,7 @@ sub test_xml_mode {
     });
 
     if ($result->{success}) {
-        my $text_content = $result->{result}->{result}->{text};
+        my $text_content = $result->{result}->{text};
         if ($text_content && length($text_content) > 5) {
             print "Unicode XML: PASS - content parsed (encoding may differ)\n";
         } else {

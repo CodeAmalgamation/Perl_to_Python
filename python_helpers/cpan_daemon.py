@@ -224,8 +224,18 @@ class RequestValidator:
         return {
             # Core helper modules
             "database": ["connect", "disconnect", "execute_statement", "fetch_row", "fetch_all",
-                        "prepare", "finish_statement", "begin_transaction", "commit", "rollback"],
+                        "prepare", "finish_statement", "begin_transaction", "commit", "rollback",
+                        "execute_immediate"],
             "xml_helper": ["xml_in", "xml_out", "escape_xml", "unescape_xml"],
+            "xml_dom_helper": ["create_parser", "parse_string", "parse_file", "get_elements_by_tag_name",
+                              "get_elements_by_tag_name_from_node", "get_attribute", "set_attribute",
+                              "has_attribute", "get_child_nodes", "get_first_child", "get_node_value",
+                              "get_tag_name", "is_element_node", "get_text_contents", "to_string",
+                              "dispose_document", "get_nodelist_length", "get_nodelist_item",
+                              "create_element", "create_text_node", "remove_attribute", "append_child",
+                              "remove_child", "replace_child", "insert_before", "clone_node",
+                              "get_parent_node", "get_module_info", "xql_query", "xql_find_nodes",
+                              "xql_find_value", "xql_exists", "get_document_root"],
             "xpath": ["new", "find", "findnodes", "findvalue", "exists"],
             "http_helper": ["lwp_request", "get", "post", "put", "delete", "head"],
             "datetime_helper": ["format_date", "parse_date", "add_days", "diff_days", "now"],
@@ -395,10 +405,10 @@ class RequestValidator:
 
         # Check for dangerous function names (but exempt whitelisted modules)
         # Exempt administrative and legitimate helper modules
-        exempt_modules = ['system', 'test', 'file_helper', 'db_helper', 'email_helper',
-                         'xml_helper', 'json_helper', 'string_helper', 'date_helper',
+        exempt_modules = ['system', 'test', 'database', 'file_helper', 'db_helper', 'email_helper',
+                         'xml_helper', 'xml_dom_helper', 'json_helper', 'string_helper', 'date_helper',
                          'datetime_helper', 'http_helper', 'sftp_helper', 'logging_helper',
-                         'excel_helper', 'crypto_helper', 'xpath_helper']
+                         'excel_helper', 'excel', 'crypto_helper', 'crypto', 'xpath_helper', 'xpath']
         if module_name not in exempt_modules:
             for dangerous in self.security_patterns["dangerous_functions"]:
                 if dangerous in function_name.lower() or dangerous in module_name.lower():
@@ -1180,6 +1190,7 @@ class CPANBridgeDaemon:
         helper_modules = [
             'database',         # Database operations (Oracle, Informix, etc.)
             'xml_helper',      # XML parsing and manipulation
+            'xml_dom_helper',  # XML::DOM replacement with full DOM functionality
             'xpath',           # XPath processing with lxml
             'http_helper',     # HTTP requests and web operations
             'datetime_helper', # DateTime operations

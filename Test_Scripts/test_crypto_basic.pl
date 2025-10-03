@@ -19,7 +19,7 @@ my $result = $bridge->call_python('crypto', 'new', {
 });
 
 if ($result->{success}) {
-    my $cipher_id= $result->{result}->{result}->{cipher_id};
+    my $cipher_id= $result->{result}->{cipher_id};
     print "✅ Cipher created successfully! ID: $cipher_id\n\n";
 
     # Test 2: Encrypt some data
@@ -31,7 +31,7 @@ if ($result->{success}) {
     });
 
     if ($result->{success}) {
-        my $encrypted_hex = $result->{result}->{result}->{encrypted};
+        my $encrypted_hex = $result->{result}->{encrypted};
         print "✅ Encryption successful!\n";
         print "Original: $plaintext\n";
         print "Encrypted (hex): $encrypted_hex\n\n";
@@ -44,7 +44,7 @@ if ($result->{success}) {
         });
 
         if ($result->{success}) {
-            my $decrypted_text = $result->{result}->{result}->{decrypted};
+            my $decrypted_text = $result->{result}->{decrypted};
             print "✅ Decryption successful!\n";
             print "Decrypted: $decrypted_text\n";
 
@@ -66,7 +66,7 @@ if ($result->{success}) {
         });
 
         if ($result->{success}) {
-            my $unicode_encrypted = $result->{result}->{result}->{encrypted};
+            my $unicode_encrypted = $result->{result}->{encrypted};
 
             # Decrypt it back
             $result = $bridge->call_python('crypto', 'decrypt', {
@@ -74,7 +74,7 @@ if ($result->{success}) {
                 hex_ciphertext => $unicode_encrypted
             });
 
-            if ($result->{success} && $result->{result}->{result}->{decrypted} eq $unicode_text) {
+            if ($result->{success} && $result->{result}->{decrypted} eq $unicode_text) {
                 print "✅ Unicode encryption test PASSED!\n\n";
             } else {
                 print "❌ Unicode encryption test FAILED!\n\n";
@@ -111,7 +111,7 @@ $result = $bridge->call_python('crypto', 'new', {
 });
 
 if ($result->{success}) {
-    my $aes_cipher_id = $result->{result}->{result}->{cipher_id};
+    my $aes_cipher_id = $result->{result}->{cipher_id};
     print "✅ AES cipher created successfully! aes_cipher_id\n";
 
     # Test AES encryption/decryption
@@ -121,14 +121,14 @@ if ($result->{success}) {
     });
 
     if ($result->{success}) {
-        my $aes_encrypted = $result->{result}->{result}->{encrypted};
+        my $aes_encrypted = $result->{result}->{encrypted};
 
         $result = $bridge->call_python('crypto', 'decrypt', {
             cipher_id => $aes_cipher_id,
             hex_ciphertext => $aes_encrypted
         });
 
-        if ($result->{success} && $result->{result}->{result}->{decrypted} eq "AES test message") {
+        if ($result->{success} && $result->{result}->{decrypted} eq "AES test message") {
             print "✅ AES round-trip test PASSED!\n\n";
         } else {
             print "❌ AES round-trip test FAILED!\n\n";
