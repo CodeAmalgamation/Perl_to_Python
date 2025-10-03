@@ -125,13 +125,14 @@ def new(key: str = None, cipher: str = "Blowfish", key_file: str = None,
             'traceback': traceback.format_exc() if _is_debug_mode() else None
         }
 
-def encrypt(cipher_id: str, plaintext: str) -> Dict[str, Any]:
+def encrypt(cipher_id: str, plaintext: str = None, plaintext_hex: str = None) -> Dict[str, Any]:
     """
     Encrypt plaintext and return hex-encoded result (matches $cipher->encrypt())
 
     Args:
         cipher_id: Cipher instance ID from new()
-        plaintext: Text to encrypt
+        plaintext: Text to encrypt (will be UTF-8 encoded) - deprecated, use plaintext_hex
+        plaintext_hex: Hex-encoded bytes to encrypt (preserves binary data)
 
     Returns:
         Dictionary with hex-encoded encrypted result
@@ -153,11 +154,29 @@ def encrypt(cipher_id: str, plaintext: str) -> Dict[str, Any]:
                 'error': 'Failed to prepare encryption key'
             }
 
+        # Get plaintext bytes - prefer hex format for binary safety
+        if plaintext_hex:
+            try:
+                plaintext_bytes = binascii.unhexlify(plaintext_hex)
+            except (ValueError, binascii.Error) as e:
+                return {
+                    'success': False,
+                    'error': f'Invalid hex input: {str(e)}'
+                }
+        elif plaintext:
+            # Legacy string mode - encode as UTF-8
+            plaintext_bytes = plaintext.encode('utf-8')
+        else:
+            return {
+                'success': False,
+                'error': 'Either plaintext or plaintext_hex must be provided'
+            }
+
         # Encrypt using specified algorithm
         if config['cipher'] == 'Blowfish':
-            encrypted_bytes = _encrypt_blowfish(key_bytes, plaintext.encode('utf-8'))
+            encrypted_bytes = _encrypt_blowfish(key_bytes, plaintext_bytes)
         elif config['cipher'] == 'AES':  # Handles both AES and Rijndael
-            encrypted_bytes = _encrypt_aes(key_bytes, plaintext.encode('utf-8'))
+            encrypted_bytes = _encrypt_aes(key_bytes, plaintext_bytes)
         else:
             return {
                 'success': False,
@@ -243,18 +262,15 @@ def decrypt(cipher_id: str, hex_ciphertext: str) -> Dict[str, Any]:
                 'error': 'Decryption operation failed'
             }
 
-        # Convert back to string
-        try:
-            plaintext = decrypted_bytes.decode('utf-8')
-        except UnicodeDecodeError:
-            # Handle binary data
-            plaintext = decrypted_bytes.decode('latin-1')
+        # Return as hex to safely preserve all binary data (null bytes, newlines, Unicode, etc.)
+        # This ensures round-trip compatibility for any binary data
+        hex_plaintext = binascii.hexlify(decrypted_bytes).decode('ascii')
 
         return {
             'success': True,
             'result': {
-                'decrypted': plaintext,
-                'length': len(plaintext),
+                'decrypted_hex': hex_plaintext,
+                'length': len(decrypted_bytes),
                 'algorithm': config['cipher']
             }
         }
