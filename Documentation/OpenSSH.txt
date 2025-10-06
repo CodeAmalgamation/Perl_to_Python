@@ -1,0 +1,850 @@
+================================================================================
+
+          Net::OpenSSH Module Usage Analysis
+
+             Generated: October 5, 2025
+
+================================================================================
+
+
+
+OVERVIEW
+
+========
+
+This analysis examines all Perl files (.pl and .pm) in the scripts directory to
+
+identify usage patterns of the Net::OpenSSH module. The goal is to understand
+
+all functionality needed to build a compatible replacement module without breaking
+
+existing code.
+
+
+
+================================================================================
+
+1. FILES USING Net::OpenSSH
+
+================================================================================
+
+
+
+PRIMARY FILE:
+
+- mi_ftp_unix_fw.pl - Contains Net::OpenSSH usage for file transfers
+
+
+
+ANALYSIS METHOD:
+
+- Searched all .pl and .pm files in src/main/resources/scripts/
+
+- Only mi_ftp_unix_fw.pl contains Net::OpenSSH related code
+
+- No other files use Net::OpenSSH, Net::SSH, or related SSH modules
+
+
+
+================================================================================
+
+2. MODULE INITIALIZATION (Constructor Calls & Parameters)
+
+================================================================================
+
+
+
+IMPORT STATEMENTS:
+
+use Net::SFTP::Foreign;
+
+use Net::OpenSSH;
+
+
+
+CONDITIONAL USAGE:
+
+- Net::OpenSSH is used when UseOpenSsh parameter is set to 'y'
+
+- Net::SFTP::Foreign is used when UseOpenSsh is 'n' (default)
+
+
+
+CONSTRUCTOR CALL PATTERN:
+
+```perl
+
+if ( lc($UseOpenSsh) eq 'y' ) {
+
+  $sftp = Net::OpenSSH->new( %sftpParams );
+
+} else {
+
+  $sftp = Net::SFTP::Foreign->new( %sftpParams );
+
+}
+
+```
+
+
+
+CONSTRUCTOR PARAMETERS (%sftpParams):
+
+- host: $RemoteHost (required)
+
+- user: $RemoteUsername (required)
+
+- port: $SftpPort (default: 22)
+
+- timeout: 30 (hardcoded)
+
+- password: $RemotePassword (if no key file)
+
+- key_path: $IdentityFile (when using OpenSSH with key authentication)
+
+
+
+PARAMETER BUILDING LOGIC:
+
+```perl
+
+my %sftpParams = %SftpConnOption; # Additional connection options
+
+$sftpParams{host} = $RemoteHost;
+
+$sftpParams{timeout} = 30;
+
+$sftpParams{user} = $RemoteUsername;
+
+$sftpParams{port} = $SftpPort if (length($SftpPort) > 0);
+
+
+
+if( length($IdentityFile) == 0 || $IdentityFile eq 0 ) {
+
+  $sftpParams{password} = $RemotePassword;
+
+} else {
+
+  if ( lc($UseOpenSsh) eq 'y' ) {
+
+    $sftpParams{key_path} = $IdentityFile;
+
+  }
+
+}
+
+```
+
+
+================================================================================
+
+3. METHODS BEING CALLED
+
+================================================================================
+
+
+
+PRIMARY Net::OpenSSH METHODS:
+
+- Net::OpenSSH->new() - Constructor for SSH connection
+
+- $sftp->scp_put() - Secure copy file to remote host
+
+- $sftp->error() - Get error information from last operation
+
+- $sftp->disconnect() - Close SSH connection
+
+
+
+METHOD USAGE PATTERNS:
+
+
+
+SCP_PUT METHOD:
+
+```perl
+
+eval {$x = $sftp->scp_put( {%sftp_put_options}, $ProcessFile, $RemoteFileName )};
+
+```
+
+
+
+ERROR CHECKING:
+
+```perl
+
+if ( $sftp->error ) {
+
+  &ErrorExit( "Could not connect to remote host: $RemoteHost\nReason:[" .
+
+        $sftp->error . "]" );
+
+}
+
+```
+
+
+
+DISCONNECT:
+
+```perl
+
+$sftp->disconnect();
+
+undef $sftp;
+
+```
+
+
+
+COMPARISON WITH SFTP::Foreign:
+
+- When UseOpenSsh='n': Uses $sftp->put() method
+
+- When UseOpenSsh='y': Uses $sftp->scp_put() method
+
+- Both use same error handling via $sftp->error()
+
+
+
+================================================================================
+
+4. SSH CONNECTION PARAMETERS
+
+================================================================================
+
+
+
+HOST CONFIGURATION:
+
+- RemoteHost: Target server hostname/IP (required)
+
+- SftpPort: SSH port number (default: 22)
+
+- RemoteUsername: SSH username (required)
+
+
+
+AUTHENTICATION OPTIONS:
+
+1. Password Authentication:
+
+  - RemotePassword: Plain text password
+
+  - Used when IdentityFile is empty or 0
+
+
+
+2. Key-based Authentication:
+
+  - IdentityFile: Path to private key file
+
+  - key_path parameter for Net::OpenSSH
+
+  - Preferred authentication method
+
+
+
+CONNECTION OPTIONS:
+
+- timeout: 30 seconds (hardcoded)
+
+- SftpConnOption: Hash of additional connection parameters
+
+- Can be extended via command-line parameters
+
+
+
+VALIDATION LOGIC:
+
+```perl
+
+if( length($IdentityFile) == 0 && length($RemotePassword) == 0 ) {
+
+  &ErrorExit( "An IdentityFile or RemotePassword must be defined" );
+
+}
+
+```
+
+
+================================================================================
+
+5. COMMAND EXECUTION PATTERNS
+
+================================================================================
+
+
+
+NO DIRECT COMMAND EXECUTION:
+
+- Net::OpenSSH is only used for file transfer operations
+
+- No system(), capture(), or shell command execution found
+
+- All operations are file transfer related (scp_put)
+
+
+
+FILE TRANSFER EXECUTION PATTERN:
+
+```perl
+
+my $XferMethodStr = "OpenSsh scp_put";
+
+$logger->info("openssh scp_put( $ProcessFile, $RemoteFileName )");
+
+eval {$x = $sftp->scp_put( {%sftp_put_options}, $ProcessFile, $RemoteFileName )};
+
+$x = 1 if ( 0 == $x ); # Normalize return value
+
+```
+
+
+
+EVAL WRAPPER:
+
+- All Net::OpenSSH operations wrapped in eval{}
+
+- Protects against exceptions during file operations
+
+- Allows graceful error handling
+
+
+
+================================================================================
+
+6. FILE TRANSFER OPERATIONS
+
+================================================================================
+
+
+
+PRIMARY OPERATION: SCP_PUT
+
+- Transfers local files to remote directory
+
+- Uses scp_put() method with options
+
+- Supports file permission and umask settings
+
+
+
+SCP_PUT OPTIONS (%sftp_put_options):
+
+```perl
+
+my %sftp_put_options = $SftpPutOption ? %{$SftpPutOption} : ();
+
+$sftp_put_options{perm} = oct( $sftp_put_options{perm} ) if( $sftp_put_options{perm} );
+
+$sftp_put_options{umask} = oct($sftp_put_options{umask}) if( $sftp_put_options{umask} );
+
+```
+
+
+
+SUPPORTED SCP_PUT OPTIONS:
+
+- perm: File permissions (octal format)
+
+- umask: File creation mask (octal format)
+
+- Additional options via SftpPutOption parameter
+
+
+
+FILE TRANSFER FLOW:
+
+1. Connect to remote host
+
+2. Transfer file using scp_put()
+
+3. Optional: Rename file with prefix
+
+4. Disconnect from remote host
+
+5. Move local file to success/failure directory
+
+
+
+REMOTE FILE NAMING:
+
+```perl
+
+my $RemoteFileName = "$RemoteDir/$FileName";
+
+# Optional prefix addition:
+
+if ($Prefix) {
+
+  my $new_name = $Prefix . $FileName;
+
+  my $NewRemoteFile = "/$RemoteDir/$new_name";
+
+}
+
+```
+
+
+
+NO GET OPERATIONS WITH Net::OpenSSH:
+
+- GET operations only use Net::SFTP::Foreign
+
+- Net::OpenSSH only used for PUT operations
+
+- No scp_get, rsync_get, or rsync_put methods found
+
+
+================================================================================
+
+7. ERROR HANDLING PATTERNS
+
+================================================================================
+
+
+
+CONNECTION ERROR HANDLING:
+
+```perl
+
+for ( my $i = 1; $i <= $RetryMaxAttempts; $i++ ) {
+
+  $sftp = Net::OpenSSH->new( %sftpParams );
+
+  if ( $sftp->error ) {
+
+    if ($i < $RetryMaxAttempts) {
+
+      $logger->info( "Could not connect to remote host: $RemoteHost" );
+
+      sleep ( $RetrySleep );
+
+      next;
+
+    } else {
+
+      &ErrorExit( "Could not connect to remote host on final attempt" );
+
+    }
+
+  }
+
+  last; # Successful connection
+
+}
+
+```
+
+
+
+RETRY CONFIGURATION:
+
+- RetryMaxAttempts: Maximum connection attempts (default: 3)
+
+- RetrySleep: Sleep between retry attempts (default: 60 seconds)
+
+- Exponential backoff not implemented
+
+
+
+TRANSFER ERROR HANDLING:
+
+```perl
+
+if ( ! $x ) { # Transfer failed
+
+  $ReturnCode = 0;
+
+  if (lc($ContinueOnFail) eq 'y') {
+
+    $logger->error("OpenSsh scp_put failed for $ProcessFile. " . $sftp->error);
+
+    $sftp_err_cnt++;
+
+  } else {
+
+    &ErrorExit("Terminating: OpenSsh scp_put failed for $ProcessFile. " . $sftp->error);
+
+  }
+
+}
+
+```
+
+
+
+ERROR HANDLING OPTIONS:
+
+- ContinueOnFail: Continue processing on errors ('y'/'n')
+
+- Error counting via $sftp_err_cnt variable
+
+- Graceful shutdown vs immediate termination
+
+
+
+EVAL PROTECTION:
+
+- All critical operations wrapped in eval{}
+
+- Prevents script death on exceptions
+
+- Allows custom error message handling
+
+
+
+================================================================================
+
+8. AUTHENTICATION METHODS
+
+================================================================================
+
+
+
+SUPPORTED AUTHENTICATION:
+
+1. Password Authentication
+
+2. Public Key Authentication
+
+3. No agent authentication found
+
+
+
+PASSWORD AUTHENTICATION:
+
+```perl
+
+if( length($IdentityFile) == 0 || $IdentityFile eq 0 ) {
+
+  $sftpParams{password} = $RemotePassword;
+
+}
+
+```
+
+
+
+KEY-BASED AUTHENTICATION:
+
+```perl
+
+if ( lc($UseOpenSsh) eq 'y' ) {
+
+  $sftpParams{key_path} = $IdentityFile;
+
+}
+
+```
+
+
+
+AUTHENTICATION VALIDATION:
+
+- Requires either IdentityFile or RemotePassword
+
+- Cannot proceed without authentication method
+
+- No support for SSH agent authentication
+
+- No support for certificate authentication
+
+
+
+KEY FILE HANDLING:
+
+- IdentityFile parameter specifies private key path
+
+- No passphrase handling for encrypted keys
+
+- Key file existence not validated before use
+
+
+================================================================================
+
+9. EDGE CASES AND COMPLEX USAGE PATTERNS
+
+================================================================================
+
+
+
+CONDITIONAL SSH MODULE USAGE:
+
+- Runtime decision between Net::OpenSSH and Net::SFTP::Foreign
+
+- UseOpenSsh parameter controls which module to use
+
+- Same interface abstraction for both modules
+
+
+
+CONNECTION TIMING:
+
+```perl
+
+my $sFTPConnectJustBeforePut = 0;
+
+if ( lc($CompressFile) eq 'y' || lc($EncryptFile) eq 'y' ) {
+
+  $sFTPConnectJustBeforePut = 1;
+
+}
+
+```
+
+
+
+DELAYED CONNECTION PATTERN:
+
+- Connect only when files are found for transfer
+
+- Reconnect before each file if compression/encryption enabled
+
+- Optimization to avoid unnecessary connections
+
+
+
+FILE PROCESSING INTEGRATION:
+
+- File compression before transfer
+
+- File encryption (GPG) before transfer
+
+- File locking during processing
+
+- Atomic move operations for success/failure
+
+
+
+RETURN VALUE NORMALIZATION:
+
+```perl
+
+eval {$x = $sftp->scp_put( {%sftp_put_options}, $ProcessFile, $RemoteFileName )};
+
+$x = 1 if ( 0 == $x ); # Ensure success is non-zero
+
+```
+
+
+
+DISCONNECT MANAGEMENT:
+
+```perl
+
+if ( defined $sftp ) {
+
+  $logger->info("sftp disconnect");
+
+  $sftp->disconnect();
+
+  undef $sftp;
+
+}
+
+```
+
+
+
+MULTIPLE DISCONNECT POINTS:
+
+- After each file transfer loop
+
+- During error conditions
+
+- At program termination
+
+
+
+================================================================================
+
+10. CONFIGURATION CONTROL
+
+================================================================================
+
+
+
+COMMAND-LINE PARAMETERS:
+
+- UseOpenSsh: Enable Net::OpenSSH usage ('y'/'n', default: 'n')
+
+- RemoteHost: Target hostname (required)
+
+- RemoteUsername: SSH username (required)
+
+- RemotePassword: Authentication password (optional)
+
+- IdentityFile: SSH private key file (optional)
+
+- SftpPort: SSH port number (default: 22)
+
+- RetryMaxAttempts: Connection retry limit (default: 3)
+
+- RetrySleep: Retry delay seconds (default: 60)
+
+- SftpConnOption: Additional connection parameters (hash)
+
+- SftpPutOption: File transfer options (hash)
+
+
+
+CONFIGURATION FILE SUPPORT:
+
+- Parameters can be specified in INI configuration file
+
+- Command-line parameters override configuration file
+
+- ConfigurationFile and ConfigurationSection required
+
+
+
+RUNTIME CONTROL:
+
+```perl
+
+$UseOpenSsh = &ValidateParameter($UseOpenSsh,"UseOpenSsh","Other","Optional", "n");
+
+```
+
+
+
+DEFAULT BEHAVIOR:
+
+- Uses Net::SFTP::Foreign by default
+
+- Net::OpenSSH only when explicitly enabled
+
+- Maintains backward compatibility
+
+
+================================================================================
+
+11. SUMMARY FOR REPLACEMENT MODULE IMPLEMENTATION
+
+================================================================================
+
+
+
+REQUIRED API COMPATIBILITY:
+
+1. Constructor: Net::OpenSSH->new(%params)
+
+2. Method: $ssh->scp_put({%options}, $local_file, $remote_file)
+
+3. Method: $ssh->error() - Returns error string or undef
+
+4. Method: $ssh->disconnect() - Closes connection
+
+
+
+REQUIRED CONSTRUCTOR PARAMETERS:
+
+1. host: Target hostname/IP address
+
+2. user: SSH username
+
+3. port: SSH port number (default 22)
+
+4. timeout: Connection timeout in seconds
+
+5. password: Authentication password (optional)
+
+6. key_path: Private key file path (optional)
+
+
+
+REQUIRED BEHAVIOR:
+
+1. Non-blocking constructor (immediate return)
+
+2. Error state accessible via ->error() method
+
+3. scp_put() returns success/failure indication
+
+4. Support for file permission/umask options
+
+5. Graceful disconnect functionality
+
+
+
+SCP_PUT OPTIONS SUPPORT:
+
+1. perm: File permissions (octal)
+
+2. umask: File creation mask (octal)
+
+3. Additional options passed through transparently
+
+
+
+ERROR HANDLING REQUIREMENTS:
+
+1. Connection errors set via ->error() method
+
+2. Transfer errors accessible via ->error() method
+
+3. Exception-safe operations (no die/croak)
+
+4. Consistent return value semantics
+
+
+
+AUTHENTICATION REQUIREMENTS:
+
+1. Password authentication support
+
+2. Public key authentication via key_path
+
+3. Automatic authentication method selection
+
+4. Graceful authentication failure handling
+
+
+
+PERFORMANCE CONSIDERATIONS:
+
+1. Connection reuse across multiple operations
+
+2. Efficient disconnect/cleanup
+
+3. Minimal resource consumption
+
+4. Timeout handling for hanging operations
+
+
+
+================================================================================
+
+END OF ANALYSIS
+
+================================================================================
+
+
+
+This analysis provides complete documentation of Net::OpenSSH usage patterns
+
+found in the Perl scripts. Any replacement implementation should maintain these
+
+exact behaviors to ensure compatibility with existing code.
+
+
+
+Generated from analysis of:
+
+- C:\Users\E828576\IdeaProjects\moneta-boot-sample\src\main\resources\scripts\
+
+
+
+Total files analyzed: 32 Perl files (.pl and .pm)
+
+Files using Net::OpenSSH: 1 (mi_ftp_unix_fw.pl)
+
+Primary usage: File transfer operations (scp_put only)
+
+Authentication: Password and key-based methods supported
+
+
