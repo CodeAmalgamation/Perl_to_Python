@@ -36,6 +36,69 @@ _CONNECTION_TIMEOUT = 1800  # 30 minutes
 _ORACLE_THICK_CLIENT_INITIALIZED = False
 _ORACLE_THICK_CLIENT_INIT_LOCK = threading.Lock()
 
+def _get_oracle_type_name(oracle_type) -> str:
+    """Convert Oracle type object to human-readable type name (Phase 2)"""
+    if oracle_type is None:
+        return 'UNKNOWN'
+
+    # Map Oracle DB types to names
+    type_map = {
+        oracledb.DB_TYPE_VARCHAR: 'VARCHAR2',
+        oracledb.DB_TYPE_NVARCHAR: 'NVARCHAR2',
+        oracledb.DB_TYPE_CHAR: 'CHAR',
+        oracledb.DB_TYPE_NCHAR: 'NCHAR',
+        oracledb.DB_TYPE_NUMBER: 'NUMBER',
+        oracledb.DB_TYPE_BINARY_FLOAT: 'BINARY_FLOAT',
+        oracledb.DB_TYPE_BINARY_DOUBLE: 'BINARY_DOUBLE',
+        oracledb.DB_TYPE_DATE: 'DATE',
+        oracledb.DB_TYPE_TIMESTAMP: 'TIMESTAMP',
+        oracledb.DB_TYPE_TIMESTAMP_TZ: 'TIMESTAMP WITH TIME ZONE',
+        oracledb.DB_TYPE_TIMESTAMP_LTZ: 'TIMESTAMP WITH LOCAL TIME ZONE',
+        oracledb.DB_TYPE_CLOB: 'CLOB',
+        oracledb.DB_TYPE_NCLOB: 'NCLOB',
+        oracledb.DB_TYPE_BLOB: 'BLOB',
+        oracledb.DB_TYPE_RAW: 'RAW',
+        oracledb.DB_TYPE_LONG_RAW: 'LONG RAW',
+        oracledb.DB_TYPE_ROWID: 'ROWID',
+        oracledb.DB_TYPE_INTERVAL_DS: 'INTERVAL DAY TO SECOND',
+        oracledb.DB_TYPE_INTERVAL_YM: 'INTERVAL YEAR TO MONTH',
+    }
+
+    return type_map.get(oracle_type, str(oracle_type))
+
+def _extract_column_metadata(cursor) -> Optional[Dict[str, Any]]:
+    """
+    Extract enhanced column metadata from cursor description (Phase 2)
+
+    cursor.description format for oracledb:
+    (name, type, display_size, internal_size, precision, scale, null_ok)
+
+    Returns DBI-compatible column information with full type details
+    """
+    if not hasattr(cursor, 'description') or not cursor.description:
+        return None
+
+    columns = []
+    for desc in cursor.description:
+        col_info = {
+            'name': desc[0],  # Column name
+            'type': _get_oracle_type_name(desc[1]) if len(desc) > 1 else 'UNKNOWN',  # Type name
+            'type_code': desc[1] if len(desc) > 1 else None,  # Oracle type object
+            'display_size': desc[2] if len(desc) > 2 else None,  # Display size
+            'internal_size': desc[3] if len(desc) > 3 else None,  # Internal size
+            'precision': desc[4] if len(desc) > 4 else None,  # Numeric precision
+            'scale': desc[5] if len(desc) > 5 else None,  # Numeric scale
+            'nullable': desc[6] if len(desc) > 6 else None,  # NULL allowed
+        }
+        columns.append(col_info)
+
+    return {
+        'count': len(columns),
+        'names': [col['name'] for col in columns],
+        'types': [col['type'] for col in columns],
+        'columns': columns  # Full metadata for each column
+    }
+
 def _simple_encrypt(text: str) -> str:
     """Simple XOR encryption for password storage (not production-grade)"""
     if not text:
@@ -1093,12 +1156,8 @@ def execute_statement(connection_id: str, statement_id: str, bind_values: List =
             # Processing SELECT statement
 
             if hasattr(cursor, 'description') and cursor.description:
-                # Description is already available
-                column_info = {
-                    'count': len(cursor.description),
-                    'names': [desc[0] for desc in cursor.description],
-                    'types': [desc[1] if len(desc) > 1 else None for desc in cursor.description]
-                }
+                # Description is already available - use enhanced metadata extractor (Phase 2)
+                column_info = _extract_column_metadata(cursor)
                 # Column info available immediately
             else:
                 # Try to peek at cursor to populate description (Oracle behavior)
@@ -1109,11 +1168,8 @@ def execute_statement(connection_id: str, statement_id: str, bind_values: List =
                     peek_row = cursor.fetchone()
 
                     if peek_row is not None and hasattr(cursor, 'description') and cursor.description:
-                        column_info = {
-                            'count': len(cursor.description),
-                            'names': [desc[0] for desc in cursor.description],
-                            'types': [desc[1] if len(desc) > 1 else None for desc in cursor.description]
-                        }
+                        # Use enhanced metadata extractor (Phase 2)
+                        column_info = _extract_column_metadata(cursor)
                         # Store the peeked row for later retrieval
                         stmt_info['peeked_row'] = peek_row
                         # Peek successful
@@ -1135,13 +1191,9 @@ def execute_statement(connection_id: str, statement_id: str, bind_values: List =
             # Processing non-SELECT statement
 
             # Try to get column info if available (some statements might return data)
-            if hasattr(cursor, 'description') and cursor.description:
-                column_info = {
-                    'count': len(cursor.description),
-                    'names': [desc[0] for desc in cursor.description],
-                    'types': [desc[1] if len(desc) > 1 else None for desc in cursor.description]
-                }
-                # Non-SELECT statement has column info
+            # Use enhanced metadata extractor (Phase 2)
+            column_info = _extract_column_metadata(cursor)
+            # Non-SELECT statement has column info
 
             # rows_affected from rowcount is typically reliable for non-SELECT statements
 
@@ -1400,14 +1452,8 @@ def execute_immediate(connection_id: str, sql: str, bind_values: List = None) ->
             rows = cursor.fetchall()
             result_data = [list(row) for row in rows] if rows else []
 
-            # Get column information
-            column_info = None
-            if hasattr(cursor, 'description') and cursor.description:
-                column_info = {
-                    'count': len(cursor.description),
-                    'names': [desc[0] for desc in cursor.description],
-                    'types': [desc[1] if len(desc) > 1 else None for desc in cursor.description]
-                }
+            # Get column information with enhanced metadata (Phase 2)
+            column_info = _extract_column_metadata(cursor)
 
             response['rows'] = result_data
             response['rows_affected'] = len(result_data)

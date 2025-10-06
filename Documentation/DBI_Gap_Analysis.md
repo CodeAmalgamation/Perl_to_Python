@@ -296,15 +296,16 @@ def connect(...):
 ### Should Implement (P1 - Important)
 
 5. **NULL Value Handling Enhancement**
-   - Currently returns empty dicts/lists
-   - Should return `None` for NULL values
-   - Matches Perl `undef` behavior
-   - Estimated effort: 2-3 hours
+   - ✅ **ALREADY WORKING**: Python `None` → JSON `null` → Perl `undef`
+   - Verified with test_null_handling.pl (3/3 tests pass)
+   - Status: **COMPLETE**
 
 6. **Column Type Information**
-   - Already partially implemented in `execute_statement()`
-   - Should enhance with full type mapping
-   - Estimated effort: 2-3 hours
+   - ✅ **IMPLEMENTED**: Full Oracle type mapping with enhanced metadata
+   - Added `_extract_column_metadata()` helper function
+   - Returns: name, type, precision, scale, nullable, display_size, internal_size
+   - Verified with test_column_metadata.pl (4/4 tests pass)
+   - Status: **COMPLETE**
 
 ### Could Implement (P2 - Nice to Have)
 
@@ -326,11 +327,11 @@ def connect(...):
 
 **Timeline: 1 week**
 
-### Phase 2: Enhancements (Should Do)
-6. Enhance NULL value handling
-7. Enhance column type information
+### Phase 2: Enhancements (Should Do) ✅ **COMPLETE**
+6. ✅ NULL value handling - Already working correctly
+7. ✅ Enhanced column type information - Fully implemented
 
-**Timeline: 2-3 days**
+**Timeline: 2-3 days** ✅ **Completed ahead of schedule**
 
 ### Phase 3: Optional (Could Do)
 8. Add DBI->trace() support
