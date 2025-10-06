@@ -125,21 +125,23 @@ if (run_test("%F token replacement", $token_test)) {
 print "\n";
 
 # ====================================================================
-# TEST 7: Environment Variable Expansion
+# TEST 7: Environment Variable Expansion (Perl-side)
 # ====================================================================
-print "Test 7: Environment variable expansion...\n";
+print "Test 7: Environment variable expansion (Perl-side)...\n";
 $ENV{TEST_LOCKDIR} = "/tmp/locktest_$$";
 mkdir $ENV{TEST_LOCKDIR} unless -d $ENV{TEST_LOCKDIR};
 
 my $env_file = "envtest.txt";
-my $env_pattern = "\$TEST_LOCKDIR/%F.lock";
+# Correct usage: Perl expands $ENV{VAR} before passing to lockfile
+my $env_pattern = "$ENV{TEST_LOCKDIR}/%F.lock";
 
 my $lock4 = $lockmgr->trylock($env_file, $env_pattern);
 
 if (run_test("Environment variable expansion", defined $lock4)) {
     my $lockfile = $lock4->lockfile();
-    print "   Pattern: \$TEST_LOCKDIR/\%F.lock\n";
-    print "   Expanded: $lockfile\n";
+    print "   Pattern (before expansion): \$ENV{TEST_LOCKDIR}/\%F.lock\n";
+    print "   Pattern (after Perl expansion): $env_pattern\n";
+    print "   Final lockfile: $lockfile\n";
 
     my $env_expanded = ($lockfile =~ /locktest_$$\/envtest\.txt\.lock/);
     run_test("Correct expansion", $env_expanded);
