@@ -240,6 +240,7 @@ class RequestValidator:
             "http_helper": ["lwp_request", "get", "post", "put", "delete", "head"],
             "datetime_helper": ["format_date", "parse_date", "add_days", "diff_days", "now"],
             "crypto": ["new", "encrypt", "decrypt", "cleanup_cipher", "hash", "generate_key", "sign", "verify"],
+            "lockfile": ["make", "trylock", "release", "cleanup_manager"],
             "email_helper": ["send_email", "send_html_email", "validate_email"],
             "logging_helper": ["log_message", "log_error", "log_warning", "log_debug"],
             "excel": ["create_workbook", "add_worksheet", "write_cell", "close_workbook"],
@@ -408,7 +409,8 @@ class RequestValidator:
         exempt_modules = ['system', 'test', 'database', 'file_helper', 'db_helper', 'email_helper',
                          'xml_helper', 'xml_dom_helper', 'json_helper', 'string_helper', 'date_helper',
                          'datetime_helper', 'http_helper', 'sftp_helper', 'logging_helper',
-                         'excel_helper', 'excel', 'crypto_helper', 'crypto', 'xpath_helper', 'xpath']
+                         'excel_helper', 'excel', 'crypto_helper', 'crypto', 'xpath_helper', 'xpath',
+                         'lockfile']
         if module_name not in exempt_modules:
             for dangerous in self.security_patterns["dangerous_functions"]:
                 if dangerous in function_name.lower() or dangerous in module_name.lower():
@@ -1195,6 +1197,7 @@ class CPANBridgeDaemon:
             'http_helper',     # HTTP requests and web operations
             'datetime_helper', # DateTime operations
             'crypto',          # Cryptography operations
+            'lockfile',        # File locking operations (LockFile::Simple replacement)
             'email_helper',    # Email sending
             'logging_helper',  # Logging operations
             'excel',           # Excel file operations
