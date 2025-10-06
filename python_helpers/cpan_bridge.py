@@ -60,6 +60,7 @@ def load_helper_modules() -> Dict[str, Any]:
         'datetime_helper', # DateTime operations (renamed from datetime to avoid conflicts)
         'crypto',       # Cryptography operations (Crypt::CBC replacement)
         'lockfile',     # File locking operations (LockFile::Simple replacement)
+        'openssh',      # SSH/SCP operations (Net::OpenSSH replacement)
         'email_helper', # Email sending (renamed from email to avoid conflicts)
         'logging_helper', # Logging operations
         'excel',        # Excel file operations
