@@ -1,0 +1,121 @@
+#!/usr/bin/perl
+# Database Configuration Template for Live Oracle Testing
+#
+# INSTRUCTIONS:
+# 1. Copy this file to db_config.pl:
+#    cp db_config.pl.template db_config.pl
+#
+# 2. Fill in your actual database details below
+#
+# 3. IMPORTANT: db_config.pl is in .gitignore - it will NOT be committed
+#    This keeps your credentials safe!
+#
+# 4. For Kerberos authentication, leave username and password empty
+
+package DBConfig;
+
+use strict;
+use warnings;
+
+# ====================================================================
+# ORACLE DATABASE CONFIGURATION
+# ====================================================================
+
+# Database Connection String (DSN)
+# Format: dbi:Oracle:<SID or SERVICE_NAME>
+# Examples:
+#   - dbi:Oracle:PRODDB
+#   - dbi:Oracle:host=dbserver.company.com;port=1521;sid=ORCL
+our $DSN = 'dbi:Oracle:YOURDB';  # ← CHANGE THIS
+
+# ====================================================================
+# AUTHENTICATION CONFIGURATION
+# ====================================================================
+
+# Authentication Method: 'password' or 'kerberos'
+our $AUTH_METHOD = 'kerberos';  # ← CHANGE THIS if using password auth
+
+# For Password Authentication (set AUTH_METHOD = 'password')
+our $USERNAME = '';  # ← Only needed for password auth
+our $PASSWORD = '';  # ← Only needed for password auth
+
+# For Kerberos Authentication (set AUTH_METHOD = 'kerberos')
+# - Leave USERNAME and PASSWORD empty
+# - Make sure you have a valid Kerberos ticket (run 'kinit' first)
+# - Oracle client must be configured for Kerberos
+
+# ====================================================================
+# TEST DATABASE OBJECTS (Optional - for advanced testing)
+# ====================================================================
+
+# If you have a test table for INSERT/UPDATE/DELETE testing
+our $TEST_TABLE = '';  # e.g., 'TEST_DBI_TABLE'
+
+# If you have a stored procedure with OUT parameters
+our $TEST_PROCEDURE = '';  # e.g., 'PKG_TEST.PROC_WITH_OUT_PARAMS'
+
+# ====================================================================
+# HELPER FUNCTION
+# ====================================================================
+
+sub get_connection_params {
+    my %params = (
+        dsn => $DSN,
+        auth_mode => $AUTH_METHOD,
+    );
+
+    if ($AUTH_METHOD eq 'password') {
+        $params{username} = $USERNAME;
+        $params{password} = $PASSWORD;
+    } elsif ($AUTH_METHOD eq 'kerberos') {
+        # For Kerberos, username/password are not needed
+        # Oracle driver will use Kerberos ticket
+        $params{username} = '';
+        $params{password} = '';
+    }
+
+    return %params;
+}
+
+1;
+
+__END__
+
+=head1 EXAMPLES
+
+=head2 Example 1: Kerberos Authentication
+
+    our $DSN = 'dbi:Oracle:PRODDB';
+    our $AUTH_METHOD = 'kerberos';
+    our $USERNAME = '';
+    our $PASSWORD = '';
+
+Before running tests, make sure you have a valid Kerberos ticket:
+
+    $ kinit your_username@YOUR.DOMAIN
+    $ klist  # Verify ticket is valid
+
+=head2 Example 2: Password Authentication
+
+    our $DSN = 'dbi:Oracle:TESTDB';
+    our $AUTH_METHOD = 'password';
+    our $USERNAME = 'testuser';
+    our $PASSWORD = 'testpass123';
+
+=head2 Example 3: TNS Name
+
+    our $DSN = 'dbi:Oracle:MY_TNS_NAME';
+    our $AUTH_METHOD = 'kerberos';
+    our $USERNAME = '';
+    our $PASSWORD = '';
+
+Make sure MY_TNS_NAME is defined in your tnsnames.ora file.
+
+=head2 Example 4: Full Connect String
+
+    our $DSN = 'dbi:Oracle:host=prod-db.company.com;port=1521;service_name=PRODDB';
+    our $AUTH_METHOD = 'kerberos';
+    our $USERNAME = '';
+    our $PASSWORD = '';
+
+=cut
