@@ -409,7 +409,8 @@ class RequestValidator:
         exempt_modules = ['system', 'test', 'database', 'file_helper', 'db_helper', 'email_helper',
                          'xml_helper', 'xml_dom_helper', 'json_helper', 'string_helper', 'date_helper',
                          'datetime_helper', 'http_helper', 'sftp_helper', 'logging_helper',
-                         'excel_helper', 'excel', 'crypto_helper', 'crypto', 'xpath_helper', 'xpath']
+                         'excel_helper', 'excel', 'crypto_helper', 'crypto', 'xpath_helper', 'xpath',
+                         'lockfile']
         if module_name not in exempt_modules:
             for dangerous in self.security_patterns["dangerous_functions"]:
                 if dangerous in function_name.lower() or dangerous in module_name.lower():
