@@ -22,6 +22,12 @@ except ImportError:
 _connections = {}
 _statements = {}
 
+# Connection cache for connect_cached()
+# TODO: Add thread safety with threading.Lock() when needed
+_CONNECTION_CACHE = {}
+_CACHE_MAX_SIZE = 50  # Maximum cached connections
+_CACHE_IDLE_TIMEOUT = 600  # 10 minutes in seconds
+
 # Persistent storage for connections across bridge calls
 _PERSISTENCE_DIR = os.path.join(tempfile.gettempdir(), 'cpan_bridge_db')
 _CONNECTION_TIMEOUT = 1800  # 30 minutes
@@ -471,6 +477,116 @@ def _ensure_connection_available(connection_id: str) -> Dict[str, Any]:
 
     return {'success': True, 'debug_info': debug_info}
 
+def _make_cache_key(dsn: str, username: str, options: Dict = None) -> str:
+    """
+    Generate cache key for connection caching
+
+    Cache key is based on DSN, username, and connection attributes.
+    Password is NOT part of the cache key (DBI behavior).
+
+    Format: "oracle:{database}:{username}:ac{0|1}_re{0|1}_pe{0|1}"
+    Example: "oracle:PROD:user1:ac0_re1_pe0"
+    """
+    # Parse DSN to get database identifier
+    db_info = _parse_oracle_dsn(dsn)
+    database = db_info.get('tns') or db_info.get('service_name') or db_info.get('sid', 'unknown')
+
+    # Extract connection attributes (with defaults matching DBI)
+    opts = options or {}
+    autocommit = 1 if opts.get('AutoCommit', True) else 0
+    raise_error = 1 if opts.get('RaiseError', False) else 0
+    print_error = 1 if opts.get('PrintError', True) else 0
+
+    # Build attribute signature
+    attr_sig = f"ac{autocommit}_re{raise_error}_pe{print_error}"
+
+    # Generate cache key
+    cache_key = f"oracle:{database}:{username}:{attr_sig}"
+
+    return cache_key
+
+def _is_connection_alive(conn: Any) -> bool:
+    """
+    Validate that database connection is still alive
+
+    Uses lightweight query to ping the database.
+    Returns True if connection is usable, False otherwise.
+    """
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1 FROM DUAL")  # Oracle ping query
+        cursor.fetchone()
+        cursor.close()
+        return True
+    except Exception:
+        # Connection is dead/broken
+        return False
+
+def _cleanup_stale_cache_entries():
+    """
+    Remove stale entries from connection cache
+
+    Removes:
+    1. Connections idle longer than _CACHE_IDLE_TIMEOUT
+    2. Dead/broken connections
+
+    Enforces _CACHE_MAX_SIZE limit using LRU eviction.
+    """
+    global _CONNECTION_CACHE
+
+    current_time = time.time()
+    keys_to_remove = []
+
+    # Find stale entries
+    for cache_key, cache_entry in _CONNECTION_CACHE.items():
+        age = current_time - cache_entry['last_used']
+
+        if age > _CACHE_IDLE_TIMEOUT:
+            # Idle too long
+            keys_to_remove.append(cache_key)
+        elif not _is_connection_alive(cache_entry['connection']['connection']):
+            # Connection is dead
+            keys_to_remove.append(cache_key)
+
+    # Remove stale entries
+    for key in keys_to_remove:
+        entry = _CONNECTION_CACHE[key]
+        try:
+            # Try to close the connection gracefully
+            entry['connection']['connection'].close()
+        except:
+            pass
+
+        # Remove from cache
+        del _CONNECTION_CACHE[key]
+
+        # Also remove from _connections if present
+        if entry['connection_id'] in _connections:
+            del _connections[entry['connection_id']]
+
+    # Enforce size limit using LRU eviction
+    if len(_CONNECTION_CACHE) > _CACHE_MAX_SIZE:
+        # Sort by last_used (oldest first)
+        sorted_entries = sorted(
+            _CONNECTION_CACHE.items(),
+            key=lambda x: x[1]['last_used']
+        )
+
+        # Remove oldest entries until we're under the limit
+        num_to_remove = len(_CONNECTION_CACHE) - _CACHE_MAX_SIZE
+        for i in range(num_to_remove):
+            key, entry = sorted_entries[i]
+
+            try:
+                entry['connection']['connection'].close()
+            except:
+                pass
+
+            del _CONNECTION_CACHE[key]
+
+            if entry['connection_id'] in _connections:
+                del _connections[entry['connection_id']]
+
 def connect(dsn: str, username: str = '', password: str = '', options: Dict = None, db_type: str = '', auth_mode: str = 'auto') -> Dict[str, Any]:
     """
     Connect to Oracle database using oracledb driver
@@ -535,6 +651,7 @@ def connect(dsn: str, username: str = '', password: str = '', options: Dict = No
             'autocommit': options.get('AutoCommit', True) if options else True,
             'raise_error': options.get('RaiseError', False) if options else False,
             'print_error': options.get('PrintError', True) if options else True,
+            'last_error': None  # DBI errstr() compatibility
         }
         _connections[connection_id] = connection_metadata
 
@@ -555,6 +672,103 @@ def connect(dsn: str, username: str = '', password: str = '', options: Dict = No
             'db_type': 'oracle',
             'auth_mode': actual_auth_mode
         }
+
+    except Exception as e:
+        return {
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }
+
+def connect_cached(dsn: str, username: str = '', password: str = '', options: Dict = None, db_type: str = '', auth_mode: str = 'auto') -> Dict[str, Any]:
+    """
+    Connect to Oracle database with connection caching (mimics DBI->connect_cached())
+
+    Returns cached connection if available and valid, otherwise creates new connection.
+
+    Cache key is based on: (dsn, username, AutoCommit, RaiseError, PrintError)
+    Password is NOT part of cache key (DBI behavior).
+
+    Parameters same as connect():
+    - dsn: Database connection string
+    - username: Database username
+    - password: Database password (not used for cache lookup)
+    - options: Connection options (AutoCommit, RaiseError, PrintError, etc.)
+    - db_type: Database type (currently only 'oracle')
+    - auth_mode: Authentication mode ('auto', 'password', 'kerberos')
+
+    Returns:
+        Dict with success status and connection_id (reused or new)
+
+    Cache Configuration:
+    - Max size: 50 connections (_CACHE_MAX_SIZE)
+    - Idle timeout: 10 minutes (_CACHE_IDLE_TIMEOUT)
+    - Validation: Every call (ensures connection is alive)
+    - Eviction: LRU (Least Recently Used)
+    """
+    global _CONNECTION_CACHE
+
+    try:
+        # Step 1: Cleanup stale cache entries before lookup
+        _cleanup_stale_cache_entries()
+
+        # Step 2: Generate cache key
+        cache_key = _make_cache_key(dsn, username, options)
+
+        # Step 3: Check if connection exists in cache
+        if cache_key in _CONNECTION_CACHE:
+            cache_entry = _CONNECTION_CACHE[cache_key]
+
+            # Step 4: Validate cached connection is still alive
+            if _is_connection_alive(cache_entry['connection']['connection']):
+                # Connection is alive - update last_used and return
+                cache_entry['last_used'] = time.time()
+
+                return {
+                    'success': True,
+                    'connection_id': cache_entry['connection_id'],
+                    'db_type': 'oracle',
+                    'auth_mode': cache_entry['connection']['auth_mode'],
+                    'cached': True  # Indicate this was from cache
+                }
+            else:
+                # Connection is dead - remove from cache
+                try:
+                    cache_entry['connection']['connection'].close()
+                except:
+                    pass
+
+                del _CONNECTION_CACHE[cache_key]
+
+                if cache_entry['connection_id'] in _connections:
+                    del _connections[cache_entry['connection_id']]
+
+                # Fall through to create new connection
+
+        # Step 5: No valid cached connection - create new one
+        result = connect(dsn, username, password, options, db_type, auth_mode)
+
+        if not result['success']:
+            return result
+
+        # Step 6: Store in cache
+        connection_id = result['connection_id']
+
+        _CONNECTION_CACHE[cache_key] = {
+            'connection_id': connection_id,
+            'connection': _connections[connection_id],
+            'created_at': time.time(),
+            'last_used': time.time(),
+            'dsn': dsn,
+            'username': username,
+            'options': options,
+            'cache_key': cache_key
+        }
+
+        # Mark as new (not cached)
+        result['cached'] = False
+
+        return result
 
     except Exception as e:
         return {
@@ -708,7 +922,9 @@ def prepare(connection_id: str, sql: str) -> Dict[str, Any]:
             'original_sql': sql,  # Keep original for reference
             'cursor': None,
             'executed': False,
-            'finished': False
+            'finished': False,
+            'out_params': {},  # Store OUT/INOUT parameter bindings
+            'last_error': None  # DBI errstr() compatibility
         }
         _statements[statement_id] = statement_metadata
 
@@ -802,10 +1018,10 @@ def execute_statement(connection_id: str, statement_id: str, bind_values: List =
         
         cursor = conn.cursor()
         stmt_info['cursor'] = cursor
-        
+
         # Handle different bind parameter formats
         final_bind_values = bind_values or []
-        
+
         # Process named bind parameters for Oracle
         if bind_params:
             # Convert named parameters to positional for Oracle
@@ -819,11 +1035,45 @@ def execute_statement(connection_id: str, statement_id: str, bind_values: List =
                         final_bind_values[param_name - 1] = param_info['value']
                     else:
                         final_bind_values.append(param_info['value'])
-        
-        # Execute with parameters
-        if final_bind_values:
+
+        # Handle OUT/INOUT parameters
+        out_param_vars = {}
+        if stmt_info.get('out_params'):
+            for param_name, param_info in stmt_info['out_params'].items():
+                # Create cursor variable for OUT parameter
+                var = cursor.var(
+                    param_info['oracle_type'],
+                    size=param_info['size']
+                )
+
+                # Set initial value for INOUT parameters
+                if param_info['initial_value'] is not None:
+                    var.setvalue(0, param_info['initial_value'])
+
+                # Store the variable
+                out_param_vars[param_name] = var
+                param_info['var'] = var
+
+        # Build bind parameters dict for OUT/INOUT
+        if out_param_vars:
+            # Combine IN and OUT parameters
+            all_params = {}
+
+            # Add IN parameters
+            if bind_values:
+                for i, val in enumerate(bind_values):
+                    all_params[f':{i+1}'] = val
+
+            # Add OUT/INOUT parameters
+            all_params.update(out_param_vars)
+
+            # Execute with combined parameters
+            cursor.execute(stmt_info['sql'], all_params)
+        elif final_bind_values:
+            # Execute with IN parameters only
             cursor.execute(stmt_info['sql'], final_bind_values)
         else:
+            # Execute without parameters
             cursor.execute(stmt_info['sql'])
 
         # Debug: Log execution details (removed direct stderr output that corrupts JSON)
@@ -1180,6 +1430,26 @@ def execute_immediate(connection_id: str, sql: str, bind_values: List = None) ->
             'error': str(e)
         }
 
+def do_statement(connection_id: str, sql: str, bind_values: List = None) -> Dict[str, Any]:
+    """
+    Execute SQL statement immediately (mimics DBI->do())
+
+    This is an alias for execute_immediate() to maintain DBI API compatibility.
+
+    Args:
+        connection_id: Database connection ID
+        sql: SQL statement to execute
+        bind_values: Optional list of bind values
+
+    Returns:
+        Dict with success status and rows_affected
+
+    Usage Pattern (from CPS::SQL):
+        $dbh->do("ALTER SESSION SET NLS_DATE_FORMAT='MM/DD/YYYY HH:MI:SS AM'");
+        $dbh->do("INSERT INTO table VALUES (?, ?)", undef, $val1, $val2);
+    """
+    return execute_immediate(connection_id, sql, bind_values)
+
 def begin_transaction(connection_id: str) -> Dict[str, Any]:
     """Begin database transaction"""
     try:
@@ -1277,11 +1547,219 @@ def finish_statement(connection_id: str, statement_id: str) -> Dict[str, Any]:
             if stmt['cursor']:
                 stmt['cursor'].close()
             del _statements[statement_id]
-        
+
         return {'success': True}
-        
+
     except Exception as e:
         return {
             'success': False,
             'error': str(e)
+        }
+
+def bind_param_inout(statement_id: str, param_name: str, initial_value: Any = None,
+                     size: int = 4000, param_type: Dict = None) -> Dict[str, Any]:
+    """
+    Bind input/output parameter for stored procedures (mimics DBI->bind_param_inout())
+
+    Args:
+        statement_id: Statement handle ID
+        param_name: Parameter name (e.g., ':1', ':param_name', or positional 1, 2, etc.)
+        initial_value: Initial value for INOUT parameters (None for OUT only)
+        size: Maximum size for output value (default 4000 for strings/CLOBs)
+        param_type: Oracle type specification (e.g., {'ora_type': 112} for CLOB)
+
+    Returns:
+        Dict with success status
+
+    Usage Pattern (from CPS::SQL):
+        $sth->bind_param_inout(':param1', \\$out_var, 4000);
+        $sth->bind_param_inout(':clob_param', \\$clob_var, 32000, { ora_type => 112 });
+    """
+    try:
+        if statement_id not in _statements:
+            return {
+                'success': False,
+                'error': f'Invalid statement ID: {statement_id}'
+            }
+
+        stmt_info = _statements[statement_id]
+
+        # Determine Oracle data type
+        oracle_type = oracledb.DB_TYPE_VARCHAR
+
+        if param_type and isinstance(param_type, dict):
+            ora_type = param_type.get('ora_type')
+            if ora_type == 112:  # Oracle CLOB type
+                oracle_type = oracledb.DB_TYPE_CLOB
+            elif ora_type == 113:  # Oracle BLOB type
+                oracle_type = oracledb.DB_TYPE_BLOB
+
+        # Normalize parameter name
+        if isinstance(param_name, int):
+            # Convert positional to Oracle format (:1, :2, etc.)
+            normalized_param = f':{param_name}'
+        elif isinstance(param_name, str):
+            if not param_name.startswith(':'):
+                normalized_param = f':{param_name}'
+            else:
+                normalized_param = param_name
+        else:
+            normalized_param = str(param_name)
+
+        # Create variable to hold output value
+        # The cursor.var() creates a Python variable that Oracle can write to
+        out_var = None  # Will be created when cursor is available
+
+        # Store parameter binding info
+        stmt_info['out_params'][normalized_param] = {
+            'initial_value': initial_value,
+            'size': size,
+            'oracle_type': oracle_type,
+            'var': out_var,  # Will be set during execute
+            'param_type': param_type
+        }
+
+        return {
+            'success': True,
+            'message': f'OUT/INOUT parameter {normalized_param} bound successfully'
+        }
+
+    except Exception as e:
+        return {
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }
+
+def get_out_params(statement_id: str) -> Dict[str, Any]:
+    """
+    Get OUT/INOUT parameter values after statement execution
+
+    Args:
+        statement_id: Statement handle ID
+
+    Returns:
+        Dict with success status and output parameter values
+
+    Usage:
+        After calling execute_statement(), call this to get OUT parameter values
+    """
+    try:
+        if statement_id not in _statements:
+            return {
+                'success': False,
+                'error': f'Invalid statement ID: {statement_id}'
+            }
+
+        stmt_info = _statements[statement_id]
+
+        if not stmt_info.get('executed'):
+            return {
+                'success': False,
+                'error': 'Statement not yet executed'
+            }
+
+        out_values = {}
+
+        if stmt_info.get('out_params'):
+            for param_name, param_info in stmt_info['out_params'].items():
+                var = param_info.get('var')
+                if var:
+                    # Get value from cursor variable
+                    value = var.getvalue()
+
+                    # Handle CLOB/BLOB - convert to string
+                    if param_info['oracle_type'] == oracledb.DB_TYPE_CLOB:
+                        if value is not None:
+                            value = value.read() if hasattr(value, 'read') else str(value)
+                    elif param_info['oracle_type'] == oracledb.DB_TYPE_BLOB:
+                        if value is not None:
+                            value = value.read() if hasattr(value, 'read') else bytes(value)
+
+                    # Remove leading : from parameter name for return
+                    clean_name = param_name[1:] if param_name.startswith(':') else param_name
+                    out_values[clean_name] = value
+
+        return {
+            'success': True,
+            'out_params': out_values
+        }
+
+    except Exception as e:
+        return {
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }
+
+def get_connection_error(connection_id: str) -> Dict[str, Any]:
+    """
+    Get last error from database handle (mimics DBI->errstr)
+
+    Args:
+        connection_id: Connection handle ID
+
+    Returns:
+        Dict with success status and error string
+
+    Usage Pattern (from DbAccess.pm):
+        my $dbh = DBI->connect(...) or die $dbh->errstr;
+        $error_msg = $dbh->errstr if $dbh;
+    """
+    try:
+        if connection_id not in _connections:
+            return {
+                'success': False,
+                'error': f'Invalid connection ID: {connection_id}'
+            }
+
+        conn_info = _connections[connection_id]
+        last_error = conn_info.get('last_error')
+
+        return {
+            'success': True,
+            'errstr': last_error if last_error else ''
+        }
+
+    except Exception as e:
+        return {
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }
+
+def get_statement_error(statement_id: str) -> Dict[str, Any]:
+    """
+    Get last error from statement handle (mimics DBI->errstr)
+
+    Args:
+        statement_id: Statement handle ID
+
+    Returns:
+        Dict with success status and error string
+
+    Usage Pattern (from DbAccess.pm):
+        my $sth = $dbh->prepare($sql) or die $dbh->errstr;
+        $stmt_error_str = $sth->errstr() if ($sth);
+    """
+    try:
+        if statement_id not in _statements:
+            return {
+                'success': False,
+                'error': f'Invalid statement ID: {statement_id}'
+            }
+
+        stmt_info = _statements[statement_id]
+        last_error = stmt_info.get('last_error')
+
+        return {
+            'success': True,
+            'errstr': last_error if last_error else ''
+        }
+
+    except Exception as e:
+        return {
+            'success': False,
+            'error': str(e),
+            'traceback': traceback.format_exc()
         }

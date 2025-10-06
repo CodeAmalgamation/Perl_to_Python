@@ -1,0 +1,998 @@
+
+            DBI Module Usage Analysis
+
+             Generated: October 5, 2025
+
+
+
+
+
+OVERVIEW
+
+========
+
+This analysis examines all Perl files (.pl and .pm) in the scripts directory to
+
+identify usage patterns of the DBI module. The goal is to understand all
+
+functionality needed to build a compatible replacement module without breaking
+
+existing code.
+
+
+
+================================================================================
+
+1. FILES USING DBI
+
+================================================================================
+
+
+
+PRIMARY FILES WITH DIRECT DBI USAGE:
+
+- DbAccess.pm - Legacy database access module with DBI operations
+
+- SQL.pm (CPS::SQL) - Modern database access module with DBI operations
+
+
+
+CONSUMER FILES (using DBI indirectly):
+
+- 30166RunInformatica.pl - Uses CPS::SQL (imports connect/disconnect)
+
+- Other scripts may use DbAccess.pm or CPS::SQL modules
+
+
+
+ANALYSIS METHOD:
+
+- Searched all .pl and .pm files in src/main/resources/scripts/
+
+- Found 2 files with direct DBI usage
+
+- Multiple files likely use these modules indirectly
+
+
+
+================================================================================
+
+2. DATABASE DRIVERS BEING USED
+
+================================================================================
+
+
+
+PRIMARY DRIVERS IDENTIFIED:
+
+
+
+1. DBD::Oracle (Oracle Database Driver)
+
+  - Used in CPS::SQL module
+
+  - DSN format: "dbi:Oracle:$database"
+
+  - Oracle-specific features used (ora_check_sql, ORA_CLOB)
+
+
+
+2. DBD::Informix (Informix Database Driver)
+
+  - Used in DbAccess.pm module
+
+  - Detected via database type checking logic
+
+  - Legacy support maintained
+
+
+
+DATABASE TYPE DETECTION LOGIC (DbAccess.pm):
+
+```perl
+
+if ($dbi =~ m/informix/i) {
+
+  $dbh = DBI->connect ( $dbi, \%attr );
+
+}
+
+elsif ($dbi =~ m/oracle/i) {
+
+  $dbh = DBI->connect ( $dbi, $user, $passwd, \%attr);
+
+}
+
+else {
+
+  log_msg ("Unrecognized DataBase type\n" .
+
+    "This script currently only processes Informix and Oracle\n");
+
+}
+
+```
+
+
+
+SUPPORTED DATABASE TYPES:
+
+- Oracle (primary usage)
+
+- Informix (legacy support)
+
+- No other database drivers detected
+
+
+
+================================================================================
+
+3. CONNECTION PATTERNS (connect() calls, DSN formats, credentials)
+
+================================================================================
+
+
+
+MODERN CONNECTION PATTERN (CPS::SQL):
+
+```perl
+
+my $dbh = DBI->connect_cached("dbi:Oracle:$database", $user, $password,
+
+  { AutoCommit => 0, ora_check_sql => 0, RaiseError => 1, PrintError => 0 })
+
+  or LOGCROAK("Connection failed: $DBI::errstr");
+
+```
+
+
+
+LEGACY CONNECTION PATTERN (DbAccess.pm):
+
+```perl
+
+my %attr = ( RaiseError => 1, AutoCommit => 1, PrintError => 1);
+
+
+
+# Informix connection
+
+if ($dbi =~ m/informix/i) {
+
+  $dbh = DBI->connect ( $dbi, \%attr );
+
+}
+
+# Oracle connection
+
+elsif ($dbi =~ m/oracle/i) {
+
+  $dbh = DBI->connect ( $dbi, $user, $passwd, \%attr);
+
+}
+
+```
+
+
+
+DSN FORMATS:
+
+1. Oracle: "dbi:Oracle:$database"
+
+2. Informix: $dbi (format not explicitly shown)
+
+
+CONNECTION ATTRIBUTES:
+
+Modern (CPS::SQL):
+
+- AutoCommit => 0 (transactions required)
+
+- ora_check_sql => 0 (disable SQL validation)
+
+- RaiseError => 1 (throw exceptions)
+
+- PrintError => 0 (suppress error printing)
+
+
+
+Legacy (DbAccess.pm):
+
+- AutoCommit => 1 (auto-commit enabled)
+
+- RaiseError => 1 (throw exceptions)
+
+- PrintError => 1 (enable error printing)
+
+
+
+POST-CONNECTION SETUP (CPS::SQL):
+
+```perl
+
+$dbh->do("ALTER SESSION SET NLS_DATE_FORMAT='MM/DD/YYYY HH:MI:SS AM'");
+
+```
+
+
+
+CONNECTION CACHING:
+
+- CPS::SQL uses DBI->connect_cached() for connection pooling
+
+- DbAccess.pm uses standard DBI->connect()
+
+
+
+================================================================================
+
+4. ALL METHODS BEING CALLED
+
+================================================================================
+
+
+
+DBI METHODS FOUND:
+
+
+
+CONNECTION METHODS:
+
+- DBI->connect() - Standard database connection
+
+- DBI->connect_cached() - Cached database connection
+
+- $dbh->disconnect() - Close database connection
+
+
+
+STATEMENT METHODS:
+
+- $dbh->prepare() - Prepare SQL statement
+
+- $dbh->do() - Execute SQL directly without prepare
+
+- $sth->execute() - Execute prepared statement
+
+- $sth->fetchrow_array() - Fetch row as array
+
+- $sth->fetchrow_hashref() - Fetch row as hash reference
+
+
+
+TRANSACTION METHODS:
+
+- $dbh->commit() - Commit transaction
+
+- $dbh->rollback() - Rollback transaction
+
+
+
+PARAMETER BINDING:
+
+- $sth->bind_param() - Bind input parameter
+
+- $sth->bind_param_inout() - Bind input/output parameter
+
+
+
+METADATA METHODS:
+
+- $sth->rows() - Get affected row count
+
+- $sth->errstr() - Get statement error string
+
+- $dbh->errstr - Get database handle error string
+
+
+
+DEBUGGING:
+
+- DBI->trace() - Enable DBI tracing
+
+
+
+================================================================================
+
+5. STATEMENT HANDLE METHODS (bind_param, bind_col, fetch patterns)
+
+================================================================================
+
+
+
+PARAMETER BINDING PATTERNS:
+
+
+
+INPUT PARAMETERS (CPS::SQL):
+
+```perl
+
+foreach (@bind_params) {
+
+  $sth->bind_param($_->{NAME}, $_->{VALUE}, $_->{TYPE})
+
+    if $_->{MODE} =~ m/^IN$/i;
+
+}
+
+```
+
+
+
+INPUT/OUTPUT PARAMETERS (CPS::SQL):
+
+```perl
+
+foreach (@bind_params) {
+
+  $sth->bind_param_inout($_->{NAME}, \$return_hash{$key_name},
+
+    $_->{SIZE}, $_->{TYPE}) if $_->{MODE} =~ m/OUT/i;
+
+}
+
+```
+
+
+
+FETCH PATTERNS:
+
+
+
+ARRAY FETCH (DbAccess.pm):
+
+```perl
+
+while ( @row = $sth->fetchrow_array( ) ) {
+
+  # Process row data
+
+  for (my $i = 0; $i <= $#row; $i++) {
+
+    my $tmp = '"' . $row[$i] . '"'; # Quote fields for CSV
+
+    $row[$i] = $tmp;
+
+  }
+
+}
+
+```
+
+
+
+HASH FETCH (CPS::SQL):
+
+```perl
+
+my $hashref = $sth->fetchrow_hashref;
+
+return() unless defined($hashref);
+
+my %row = %$hashref;
+
+
+
+# Handle NULL values
+
+foreach my $key (keys %row) {
+
+  $row{$key} = '' unless defined($row{$key});
+
+}
+
+```
+
+
+
+PARAMETER STRUCTURE (CPS::SQL):
+
+```perl
+
+my $rec = {
+
+  NAME => $name,
+
+  MODE => $mode,   # IN, OUT, INOUT
+
+  VALUE => $value,
+
+  SIZE => $size,
+
+  TYPE => $is_clob ? { ora_type => 112 } : undef # Oracle CLOB type
+
+};
+
+```
+
+
+
+NO BIND_COL USAGE FOUND:
+
+- No explicit bind_col() method calls detected
+
+- All fetching done via fetchrow_array() or fetchrow_hashref()
+
+
+
+================================================================================
+
+6. TRANSACTION HANDLING (begin_work, commit, rollback, AutoCommit)
+
+================================================================================
+
+
+
+AUTOCOMMIT SETTINGS:
+
+
+
+Modern Approach (CPS::SQL):
+
+- AutoCommit => 0 (explicit transaction control)
+
+- Requires manual commit/rollback
+
+
+
+Legacy Approach (DbAccess.pm):
+
+- AutoCommit => 1 (auto-commit each statement)
+
+- No explicit transaction management
+
+
+
+TRANSACTION METHODS:
+
+
+
+COMMIT (CPS::SQL):
+
+```perl
+
+sub commit {
+
+  my ($dbh) = @_;
+
+  INFO("Committing transaction(s)");
+
+  $dbh->commit;
+
+}
+
+```
+
+
+
+ROLLBACK (CPS::SQL):
+
+```perl
+
+sub rollback {
+
+  my ($dbh) = @_;
+
+  INFO("Rolling back transaction(s)");
+
+  $dbh->rollback;
+
+}
+
+```
+
+
+
+NO BEGIN_WORK USAGE:
+
+- No explicit begin_work() calls found
+
+- Transactions start implicitly with AutoCommit => 0
+
+
+
+TRANSACTION PATTERNS:
+
+1. CPS::SQL: Manual transaction control with commit/rollback
+
+2. DbAccess.pm: Auto-commit mode, no transaction management
+
+
+
+================================================================================
+
+7. ERROR HANDLING (RaiseError, PrintError, HandleError, eval blocks)
+
+================================================================================
+
+
+
+ERROR HANDLING ATTRIBUTES:
+
+
+
+CPS::SQL Error Handling:
+
+- RaiseError => 1 (exceptions thrown)
+
+- PrintError => 0 (no automatic error printing)
+
+- Uses Log::Log4perl for error logging
+
+- LOGCROAK() for fatal errors
+
+
+
+DbAccess.pm Error Handling:
+
+- RaiseError => 1 (exceptions thrown)
+
+- PrintError => 1 (automatic error printing)
+
+- Uses log_msg() for error reporting
+
+
+
+ERROR CHECKING PATTERNS:
+
+
+
+CONNECTION ERRORS (DbAccess.pm):
+
+```perl
+
+if ( ! $dbh ) {
+
+  log_msg( "FATAL ERROR: Cannot connect to database [$dbi] as [$user]\n");
+
+  return( $FAILURE );
+
+}
+
+```
+
+
+
+STATEMENT ERRORS (DbAccess.pm):
+
+```perl
+
+my $sth = $dbh->prepare( $SQLstatement ) or die $dbh->errstr;
+
+$stmt_error_str = $sth->errstr() if ( $sth );
+
+$dbPrepErr = $sth->errstr if ($sth);
+
+```
+
+
+
+PARAMETER VALIDATION (CPS::SQL):
+
+```perl
+
+LOGCROAK("Database handle not defined") unless defined($dbh);
+
+LOGCROAK("SQL statement not defined") unless defined($sql);
+
+LOGCROAK("Execute_SQL doesn't support OUT parameters")
+
+  if $_->{MODE} =~ m/OUT/i;
+
+```
+
+
+
+NO HANDLEERROR USAGE:
+
+- No custom error handler callbacks found
+
+- Standard RaiseError/PrintError attributes used
+
+
+
+NO EVAL BLOCKS FOR DBI:
+
+- DBI operations not wrapped in eval{} blocks
+
+- Relies on RaiseError for exception handling
+
+
+
+DBI TRACING:
+
+```perl
+
+DBI->trace(2) if ($Dbg > 8); # Enable detailed tracing
+
+```
+
+
+================================================================================
+
+8. CONNECTION ATTRIBUTES AND OPTIONS
+
+================================================================================
+
+
+
+STANDARD CONNECTION ATTRIBUTES:
+
+
+
+CPS::SQL Connection Attributes:
+
+```perl
+
+{
+
+  AutoCommit => 0,    # Manual transaction control
+
+  ora_check_sql => 0,   # Disable Oracle SQL validation
+
+  RaiseError => 1,    # Throw exceptions on errors
+
+  PrintError => 0     # Suppress automatic error printing
+
+}
+
+```
+
+
+
+DbAccess.pm Connection Attributes:
+
+```perl
+
+my %attr = (
+
+  RaiseError => 1,    # Throw exceptions on errors
+
+  AutoCommit => 1,    # Auto-commit each statement
+
+  PrintError => 1     # Enable automatic error printing
+
+);
+
+```
+
+
+
+ORACLE-SPECIFIC ATTRIBUTES:
+
+- ora_check_sql => 0 (disable SQL syntax checking)
+
+- ora_type => 112 (Oracle CLOB data type constant)
+
+
+
+POST-CONNECTION SESSION SETTINGS:
+
+```perl
+
+$dbh->do("ALTER SESSION SET NLS_DATE_FORMAT='MM/DD/YYYY HH:MI:SS AM'");
+
+```
+
+
+
+CONNECTION CACHING:
+
+- connect_cached() used in CPS::SQL for performance
+
+- Standard connect() used in DbAccess.pm
+
+
+
+DEBUGGING ATTRIBUTES:
+
+- DBI->trace(2) for detailed operation logging
+
+- Controlled by debug level variables
+
+
+
+================================================================================
+
+9. EDGE CASES AND COMPLEX USAGE PATTERNS
+
+================================================================================
+
+
+
+MULTI-DATABASE SUPPORT (DbAccess.pm):
+
+- Runtime database type detection via DSN pattern matching
+
+- Different connection patterns for Oracle vs Informix
+
+- Fallback error handling for unsupported database types
+
+
+
+PARAMETER BINDING COMPLEXITY (CPS::SQL):
+
+- Support for IN, OUT, and INOUT parameter modes
+
+- Dynamic parameter type determination (CLOB vs standard)
+
+- Return value handling for single vs multiple OUT parameters
+
+
+
+```perl
+
+# Single OUT parameter returns scalar
+
+return $vals[0];
+
+
+
+# Multiple OUT parameters return hash
+
+return %return_hash if wantarray;
+
+return \%return_hash if (scalar keys(%return_hash) > 1);
+
+```
+
+
+CSV OUTPUT GENERATION (DbAccess.pm):
+
+```perl
+
+# Quote all fields for CSV compatibility
+
+for (my $i = 0; $i <= $#row; $i++) {
+
+  my $tmp = '"' . $row[$i] . '"';
+
+  $row[$i] = $tmp;
+
+}
+
+```
+
+
+
+NULL VALUE HANDLING (CPS::SQL):
+
+```perl
+
+# Replace NULL values with empty strings
+
+foreach my $key (keys %row) {
+
+  $row{$key} = '' unless defined($row{$key});
+
+}
+
+```
+
+
+
+SQL FILE PROCESSING (DbAccess.pm):
+
+- Multi-line SQL statement assembly
+
+- Comment filtering (# -- /* */)
+
+- Variable substitution in SQL text
+
+- Batch SQL execution from files
+
+
+
+VARIABLE SUBSTITUTION PATTERN:
+
+```perl
+
+while ( 1 ) {
+
+  if ($sql_string =~ m/(\$((ini_|opt_|env|\w+)\w*))/ ) {
+
+    $variable = $1;
+
+    my $conversion = eval( $variable );
+
+    $sql_string =~ s/$$variable/$conversion/;
+
+  } else {
+
+    last;
+
+  }
+
+}
+
+```
+
+
+
+LEGACY SQL EXECUTION (CPS::SQL - DEPRECATED):
+
+- External sqlplus process execution
+
+- Environment variable setup for connections
+
+- Shell command integration for backward compatibility
+
+
+
+CONNECTION REUSE PATTERN (DbAccess.pm):
+
+```perl
+
+# Connection caching logic
+
+if ( ! defined( $dbh ) || ! $dbh ) {
+
+  # Only connect if no existing handle
+
+  $dbh = DBI->connect(...);
+
+}
+
+```
+
+
+
+ORACLE CLOB HANDLING:
+
+```perl
+
+TYPE => $is_clob ? { ora_type => 112 } : undef
+
+```
+
+
+================================================================================
+
+10. SUMMARY FOR REPLACEMENT MODULE IMPLEMENTATION
+
+================================================================================
+
+
+
+REQUIRED API COMPATIBILITY:
+
+
+
+CORE DBI METHODS:
+
+1. DBI->connect($dsn, $user, $pass, \%attr)
+
+2. DBI->connect_cached($dsn, $user, $pass, \%attr)
+
+3. $dbh->disconnect()
+
+4. $dbh->prepare($sql)
+
+5. $dbh->do($sql)
+
+6. $sth->execute()
+
+7. $sth->fetchrow_array()
+
+8. $sth->fetchrow_hashref()
+
+9. $sth->bind_param($param, $value, $type)
+
+10. $sth->bind_param_inout($param, \$var, $size, $type)
+
+11. $dbh->commit()
+
+12. $dbh->rollback()
+
+13. $sth->rows()
+
+14. $sth->errstr()
+
+15. $dbh->errstr
+
+16. DBI->trace($level)
+
+
+
+REQUIRED CONNECTION ATTRIBUTES:
+
+1. AutoCommit (0 or 1)
+
+2. RaiseError (1 - must throw exceptions)
+
+3. PrintError (0 or 1)
+
+4. ora_check_sql (Oracle-specific, 0)
+
+
+
+REQUIRED BEHAVIOR:
+
+1. Connection caching via connect_cached()
+
+2. Exception throwing with RaiseError => 1
+
+3. Support for Oracle and Informix database types
+
+4. Parameter binding for IN/OUT/INOUT modes
+
+5. NULL value handling in result sets
+
+6. Transaction management with manual commit/rollback
+
+7. Row counting for affected records
+
+8. Error message propagation via errstr methods
+
+
+
+ORACLE-SPECIFIC REQUIREMENTS:
+
+1. DSN format: "dbi:Oracle:$database"
+
+2. CLOB data type support (ora_type => 112)
+
+3. Session initialization queries support
+
+4. Date format configuration support
+
+
+
+DATABASE DRIVER REQUIREMENTS:
+
+1. DBD::Oracle driver support
+
+2. DBD::Informix driver support (legacy)
+
+3. Driver auto-detection based on DSN pattern
+
+
+
+ERROR HANDLING REQUIREMENTS:
+
+1. Exception throwing on connection failures
+
+2. Exception throwing on SQL errors
+
+3. Error message accessibility via errstr methods
+
+4. Optional error printing via PrintError attribute
+
+5. Integration with logging frameworks (Log::Log4perl)
+
+
+
+PERFORMANCE REQUIREMENTS:
+
+1. Connection pooling/caching support
+
+2. Efficient statement preparation and execution
+
+3. Optimized fetch operations for large result sets
+
+4. Minimal memory footprint for result processing
+
+
+
+SPECIAL FEATURES:
+
+1. Debug tracing support via DBI->trace()
+
+2. Multi-line SQL statement processing
+
+3. SQL comment filtering and processing
+
+4. Variable substitution in SQL statements
+
+5. CSV output formatting for result sets
+
+6. External sqlplus integration (legacy support)
+
+
+
+================================================================================
+
+END OF ANALYSIS
+
+================================================================================

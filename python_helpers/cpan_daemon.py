@@ -223,9 +223,10 @@ class RequestValidator:
         """Load allowed modules and their functions"""
         return {
             # Core helper modules
-            "database": ["connect", "disconnect", "execute_statement", "fetch_row", "fetch_all",
+            "database": ["connect", "connect_cached", "disconnect", "execute_statement", "fetch_row", "fetch_all",
                         "prepare", "finish_statement", "begin_transaction", "commit", "rollback",
-                        "execute_immediate"],
+                        "execute_immediate", "do_statement", "bind_param_inout", "get_out_params",
+                        "get_connection_error", "get_statement_error"],
             "xml_helper": ["xml_in", "xml_out", "escape_xml", "unescape_xml"],
             "xml_dom_helper": ["create_parser", "parse_string", "parse_file", "get_elements_by_tag_name",
                               "get_elements_by_tag_name_from_node", "get_attribute", "set_attribute",
