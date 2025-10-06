@@ -240,6 +240,7 @@ class RequestValidator:
             "http_helper": ["lwp_request", "get", "post", "put", "delete", "head"],
             "datetime_helper": ["format_date", "parse_date", "add_days", "diff_days", "now"],
             "crypto": ["new", "encrypt", "decrypt", "cleanup_cipher", "hash", "generate_key", "sign", "verify"],
+            "lockfile": ["make", "trylock", "release", "cleanup_manager"],
             "email_helper": ["send_email", "send_html_email", "validate_email"],
             "logging_helper": ["log_message", "log_error", "log_warning", "log_debug"],
             "excel": ["create_workbook", "add_worksheet", "write_cell", "close_workbook"],
@@ -1195,6 +1196,7 @@ class CPANBridgeDaemon:
             'http_helper',     # HTTP requests and web operations
             'datetime_helper', # DateTime operations
             'crypto',          # Cryptography operations
+            'lockfile',        # File locking operations (LockFile::Simple replacement)
             'email_helper',    # Email sending
             'logging_helper',  # Logging operations
             'excel',           # Excel file operations

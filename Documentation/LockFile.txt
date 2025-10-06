@@ -1,0 +1,550 @@
+================================================================================
+
+          LockFile::Simple Module Usage Analysis
+
+             Generated: October 5, 2025
+
+================================================================================
+
+
+
+OVERVIEW
+
+========
+
+This analysis examines all Perl files (.pl and .pm) in the scripts directory to
+
+identify usage patterns of the LockFile::Simple module. The goal is to understand
+
+all functionality needed to build a compatible replacement module without breaking
+
+existing code.
+
+
+
+================================================================================
+
+1. FILES USING LockFile::Simple
+
+================================================================================
+
+
+
+PRIMARY FILE:
+
+- NfsLock.pm - Contains the LockFile::Simple implementation wrapper
+
+
+
+CONSUMER FILE:
+
+- pmart_fw.pl - Uses the NfsLock module for file locking functionality
+
+
+
+ANALYSIS METHOD:
+
+- Searched all .pl and .pm files in src/main/resources/scripts/
+
+- Only these two files contain LockFile::Simple related code
+
+
+
+================================================================================
+
+2. MODULE INITIALIZATION (Constructor Calls & Parameters)
+
+================================================================================
+
+
+
+IMPORT STATEMENT (NfsLock.pm):
+
+use LockFile::Simple qw(lock trylock unlock);
+
+
+
+CONSTRUCTOR CALL:
+
+$lockmgr = LockFile::Simple->make( -nfs => 1, -hold => 90 );
+
+
+
+KEY PARAMETERS:
+
+- -nfs => 1   : Enables NFS-safe locking mechanism
+
+- -hold => 90  : Makes locks stale and reusable after 90 seconds
+
+
+
+PURPOSE OF HOLD TIME:
+
+- Needed because LockFile::Simple occasionally will not determine
+
+ the locking PID correctly
+
+- Prevents permanent lock files from blocking future operations
+
+
+
+================================================================================
+
+3. METHODS BEING CALLED
+
+================================================================================
+
+
+
+CORE LockFile::Simple METHODS:
+
+- LockFile::Simple->make() : Creates lock manager instance
+
+- $lockmgr->trylock()    : Attempts to acquire lock (non-blocking)
+
+- $lock->release()     : Releases the acquired lock
+
+
+
+NFSLOCK.PM WRAPPER METHODS:
+
+- new()           : Creates NfsLock instance
+
+- lock_file($work_file)   : Wrapper for acquiring locks
+
+- unlock_file()       : Wrapper for releasing locks
+
+
+
+METHOD FLOW:
+
+1. NfsLock->new() creates wrapper instance
+
+2. lock_file() calls LockFile::Simple->make() then trylock()
+
+3. unlock_file() calls release() on the lock object
+
+
+================================================================================
+
+4. LOCK FILE PATHS AND NAMING PATTERNS
+
+================================================================================
+
+
+
+LOCK FILE TEMPLATE:
+
+$self->{lockFile} = "$ENV{DATADIR}/out_files/%F.lock";
+
+
+
+NAMING PATTERN BREAKDOWN:
+
+- Base Directory: $ENV{DATADIR}/out_files/
+
+- File Pattern:  %F.lock
+
+- %F Replacement: Input filename passed to lock_file()
+
+
+
+EXAMPLES:
+
+- Input file: "data123.txt"
+
+- Lock file:  "$ENV{DATADIR}/out_files/data123.txt.lock"
+
+- Input file: "report_20251005.csv"
+
+- Lock file:  "$ENV{DATADIR}/out_files/report_20251005.csv.lock"
+
+
+
+ENVIRONMENT DEPENDENCY:
+
+- Requires DATADIR environment variable to be set
+
+- Lock files stored in centralized location for NFS coordination
+
+
+
+================================================================================
+
+5. TIMEOUT CONFIGURATIONS AND RETRY LOGIC
+
+================================================================================
+
+
+
+TIMEOUT SETTINGS:
+
+- Stale Lock Timeout: 90 seconds (via -hold => 90 parameter)
+
+- No explicit retry mechanism implemented
+
+- Uses trylock() for single attempt, non-blocking behavior
+
+
+
+TIMEOUT BEHAVIOR:
+
+- After 90 seconds, stale locks become reusable
+
+- Handles cases where process dies without releasing lock
+
+- Prevents permanent deadlocks in NFS environments
+
+
+
+NO RETRY LOGIC:
+
+- Single trylock() attempt per call
+
+- Returns success/failure immediately
+
+- Calling code handles retry if needed
+
+
+
+================================================================================
+
+6. ERROR HANDLING PATTERNS
+
+================================================================================
+
+
+
+LOCK ACQUISITION ERROR HANDLING (NfsLock.pm):
+
+```perl
+
+if ( $self->{lock} = $lockmgr->trylock( $work_file, "$self->{lockFile}" ) ) {
+
+  print "File $work_file locked\n";
+
+  $retCode = 1; # Success
+
+} else {
+
+  print "Couldn't lock file $work_file because $!\n";
+
+  # $retCode remains 0 (failure)
+
+}
+
+```
+
+
+
+UNLOCK ERROR HANDLING (NfsLock.pm):
+
+```perl
+
+eval {
+
+  if ( $self->{lock} ) {
+
+    $retCode = $self->{lock}->release;
+
+  }
+
+};
+
+if ($@) {
+
+  print "Unable to unlock file:\n$@\n";
+
+}
+
+```
+
+ERROR HANDLING CHARACTERISTICS:
+
+- Uses eval {} to catch unlock exceptions
+
+- Prints error messages to STDOUT
+
+- Sets $! variable for system error details
+
+- Returns boolean success/failure codes
+
+
+
+================================================================================
+
+7. LOCK SCOPE (Acquisition and Release Points)
+
+================================================================================
+
+
+
+LOCK ACQUISITION POINTS (pmart_fw.pl):
+
+1. Before moving file from incoming directory to process directory
+
+2. After file move, for lock verification/re-acquisition
+
+
+
+LOCK RELEASE POINTS (pmart_fw.pl):
+
+1. After successful file move operation
+
+2. When lock verification fails (triggers file rollback)
+
+
+
+CRITICAL SECTIONS PROTECTED:
+
+- File movement operations between directories
+
+- Prevention of multiple file watchers processing same file
+
+- Race condition prevention in NFS environments
+
+
+
+DETAILED LOCKING FLOW:
+
+1. Random sleep (0-3 seconds) to minimize race conditions
+
+2. Attempt lock on incoming file
+
+3. If successful, move file to process directory
+
+4. Release lock
+
+5. Re-acquire lock on file in process directory
+
+6. If re-lock successful, release and continue processing
+
+7. If re-lock fails, move file back to incoming directory
+
+
+
+================================================================================
+
+8. EDGE CASES AND COMPLEX USAGE PATTERNS
+
+================================================================================
+
+
+
+RACE CONDITION MITIGATION:
+
+```perl
+
+my $RandSecs = rand(3);
+
+sleep($RandSecs); # Sleep 0-3 seconds before locking attempt
+
+```
+
+
+
+DOUBLE-LOCKING PATTERN FOR NFS SAFETY:
+
+```perl
+
+# First lock: Before file move
+
+if ( $alf->lock_file( $incomingFile ) ) {
+
+  move("$incomingFile", "$opt_ProcessPath/$workFile");
+
+}
+
+
+
+# Second lock: Verify exclusive access after move
+
+if ( $alf->lock_file( $processFile ) ) {
+
+  log_msg( "Now successfully re-locked file [${processFile}]." );
+
+  $alf->unlock_file(); # Release verification lock
+
+}
+
+```
+
+
+
+LOCK VERIFICATION PATTERN:
+
+- Purpose: Ensure lock wasn't lost during file operations
+
+- If verification fails: Move file back to incoming directory
+
+- Prevents processing of files that other processes might access
+
+
+
+FALLBACK BEHAVIORS:
+
+- Lock failure: Skip file processing, try next file
+
+- Lock lost during processing: Rollback file location
+
+- Process already exists: Skip to prevent duplicate processing
+
+
+
+CONDITIONAL LOCKING:
+
+- Controlled by UseNfsLocking command-line parameter
+
+- Default: 'N' (disabled)
+
+- When 'Y': Full NFS locking protocol activated
+
+- When 'N': Simple file move without locking
+
+
+
+================================================================================
+
+9. CONFIGURATION CONTROL
+
+================================================================================
+
+
+
+COMMAND-LINE OPTION:
+
+"UseNfsLocking=s" => \$opt_UseNfsLocking
+
+
+
+DEFAULT VALUE:
+
+my $opt_UseNfsLocking = 'N';
+
+
+
+RUNTIME CONTROL LOGIC:
+
+```perl
+
+if ( uc($opt_UseNfsLocking) eq 'Y' ) {
+
+  # Use NFS locking protocol
+
+  # - Random sleep for race condition avoidance
+
+  # - Lock file before move
+
+  # - Verify lock after move
+
+  # - Double-unlock pattern
+
+} else {
+
+  # Use simple file move without locking
+
+  # - Direct file move operation
+
+  # - No lock coordination
+
+}
+
+```
+
+
+
+CONFIGURATION IMPACT:
+
+- Controls whether NFS-safe locking is used
+
+- Affects performance (locking adds delays)
+
+- Required for multi-process environments on NFS
+
+
+
+================================================================================
+
+10. SUMMARY FOR REPLACEMENT MODULE IMPLEMENTATION
+
+================================================================================
+
+
+
+REQUIRED API COMPATIBILITY:
+
+1. Constructor: LockFile::Simple->make(-nfs => 1, -hold => 90)
+
+2. Method: $lockmgr->trylock($filename, $lockfile_pattern)
+
+3. Method: $lock_object->release()
+
+4. Return: Lock object on success, undefined on failure
+
+
+
+REQUIRED BEHAVIOR:
+
+1. Lock file creation in $ENV{DATADIR}/out_files/%F.lock format
+
+2. 90-second stale lock cleanup mechanism
+
+3. NFS-safe locking behavior
+
+4. Non-blocking lock attempts (trylock semantics)
+
+5. Proper $! error variable setting
+
+
+
+CRITICAL FEATURES:
+
+1. %F token replacement with actual filename
+
+2. Stale lock detection and cleanup
+
+3. Exception handling compatibility
+
+4. Return value semantics matching original
+
+
+
+ERROR HANDLING REQUIREMENTS:
+
+1. Set $! variable on system errors
+
+2. Return undefined on lock failure
+
+3. Allow eval{} wrapped unlock calls
+
+4. Maintain print-to-STDOUT error messages
+
+
+
+ENVIRONMENT DEPENDENCIES:
+
+1. DATADIR environment variable access
+
+2. File system write permissions to lock directory
+
+3. NFS-compatible file locking mechanism
+
+
+
+PERFORMANCE CONSIDERATIONS:
+
+1. Non-blocking operations (no indefinite waits)
+
+2. Minimal overhead for lock attempts
+
+3. Efficient stale lock cleanup
+
+4. Race condition handling
+
+
+
+================================================================================
+
+END OF ANALYSIS
+
+================================================================================

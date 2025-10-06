@@ -285,10 +285,15 @@ sub _execute_with_timeout {
     }
     
     $self->{last_python_output} = $output;
-    
+
+    # Debug: Show what we got
+    if ($self->{debug} > 1) {
+        $self->_debug("Output to decode: '" . substr($output // '', 0, 200) . "'");
+    }
+
     # Parse JSON response
     my $result = $self->_safe_json_decode($output);
-    
+
     return $result;
 }
 
@@ -323,57 +328,60 @@ sub _execute_with_files {
 # IPC::Open3 execution for Unix systems - IMPROVED VERSION
 sub _execute_with_open3 {
     my ($self, $command, $input) = @_;
-    
+
     require IPC::Open3;
     require Symbol;
-    
+
     my $timeout = $self->{timeout};
     my ($in_fh, $out_fh, $err_fh);
-    
+    my $output_result;
+
     $err_fh = Symbol::gensym();
-    
+
     $self->_debug("Starting IPC::Open3 with command: $command");
-    
+
     eval {
         local $SIG{ALRM} = sub { die "timeout\n" };
         alarm($timeout);
-        
+
         my $pid = IPC::Open3::open3($in_fh, $out_fh, $err_fh, $command);
         $self->_debug("Process started with PID: $pid");
-        
+
         # Send input and close stdin immediately to avoid deadlock
         print $in_fh $input;
         close($in_fh);
         $self->_debug("Input sent and stdin closed");
-        
+
         # Read output
         my $output = do { local $/; <$out_fh> };
         my $error = do { local $/; <$err_fh> };
-        
+
         close($out_fh);
         close($err_fh);
-        
+
         waitpid($pid, 0);
         my $exit_code = $? >> 8;
-        
+
         alarm(0);
-        
+
         $self->_debug("Process completed with exit code: $exit_code");
         $self->_debug("Output length: " . length($output || ''));
-        
+
         if ($exit_code != 0) {
             die "Python script failed with exit code $exit_code: $error";
         }
-        
-        return $output;
+
+        $output_result = $output;  # Store result outside eval
     };
-    
+
     alarm(0);
-    
+
     if ($@) {
         $self->_debug("IPC::Open3 failed: $@");
         die $@;
     }
+
+    return $output_result;  # Return the captured output
 }
 
 # Simple pipe execution - fallback method
