@@ -13,24 +13,41 @@ our $VERSION = '1.00';
 
 sub new {
     my ($class, %args) = @_;
-    
+
     my $self = $class->SUPER::new();
-    
-    # Handle filename parameter (your primary usage pattern)
+
+    # Handle filename parameter (file-based loading)
     if ($args{filename}) {
         my $result = $self->call_python('xpath', 'load_file', {
             filename => $args{filename}
         });
-        
+
         unless ($result && $result->{success}) {
             my $error = $result ? $result->{error} : "Failed to load XML file";
             die "ERROR: Unparsable Config File [$args{filename}]\n$error\n";
         }
-        
+
         $self->{document_id} = $result->{result}->{document_id};
         $self->{filename} = $args{filename};
     }
-    
+    # Handle xml parameter (string-based loading)
+    elsif ($args{xml}) {
+        my $result = $self->call_python('xpath', 'load_xml_string', {
+            xml_string => $args{xml}
+        });
+
+        unless ($result && $result->{success}) {
+            my $error = $result ? $result->{error} : "Failed to parse XML string";
+            die "ERROR: Unparsable XML String\n$error\n";
+        }
+
+        $self->{document_id} = $result->{result}->{document_id};
+        $self->{xml_source} = 'string';
+    }
+    else {
+        croak "Either 'filename' or 'xml' parameter required for XML::XPath->new()";
+    }
+
     return $self;
 }
 
@@ -60,10 +77,28 @@ sub find {
     return XPathHelper::NodeSet->new($result->{result}, $self);
 }
 
-# Additional methods for compatibility (if needed)
+# Additional methods for compatibility
 sub getDocumentElement {
     my $self = shift;
     return $self->find('/')->get_node(1);  # Root element
+}
+
+# Critical method used in production: getNodeText()
+# Used in WebSphere/WebLogic wrapper functions
+sub getNodeText {
+    my ($self, $node) = @_;
+
+    unless (defined $node) {
+        croak "Node parameter required for getNodeText()";
+    }
+
+    # If it's a Node object, extract text value
+    if (ref($node) && $node->can('string_value')) {
+        return $node->string_value();
+    }
+
+    # If it's already a string (edge case), return as-is
+    return $node;
 }
 
 sub dispose {

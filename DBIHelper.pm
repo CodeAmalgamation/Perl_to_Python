@@ -46,7 +46,7 @@ sub new {
 # DBI->connect - handles all your connection patterns
 sub connect {
     my ($class, $dsn, $username, $password, $attr) = @_;
-    
+
     # Handle alternate connection pattern: DBI->connect($dbi, \%attr)
     if (ref($dsn) eq 'HASH') {
         $attr = $dsn;
@@ -54,35 +54,35 @@ sub connect {
         $username = '';
         $password = '';
     }
-    
+
     # Handle Oracle TNS pattern: "dbi:Oracle:" with "username@sid"
     if ($dsn eq "dbi:Oracle:" && $username && $username =~ /(.+)\@(.+)/) {
         my ($user, $sid) = ($1, $2);
         $dsn = "dbi:Oracle:sid=$sid";
         $username = $user;
     }
-    
+
     # Check for persistent connection
     if (defined($persistent_dbh) && $persistent_dbh && $persistent_dbh->{connected}) {
         return $persistent_dbh;
     }
-    
+
     my $self = $class->new(
         dsn => $dsn,
         username => $username,
         password => $password
     );
-    
+
     # Set connection attributes
     if ($attr && ref($attr) eq 'HASH') {
         $self->{AutoCommit} = $attr->{AutoCommit} if exists $attr->{AutoCommit};
         $self->{RaiseError} = $attr->{RaiseError} if exists $attr->{RaiseError};
         $self->{PrintError} = $attr->{PrintError} if exists $attr->{PrintError};
     }
-    
+
     # Database type is always Oracle
     my $db_type = 'oracle';
-    
+
     # Connect via Python bridge
     my $result = $self->call_python('database', 'connect', {
         dsn => $dsn,
@@ -91,11 +91,11 @@ sub connect {
         db_type => $db_type,
         options => $attr || {}
     });
-    
+
     if (!$result || !$result->{success}) {
         my $error = $result ? $result->{error} : "Unknown connection error";
         $self->_set_error($error);
-        
+
         if ($self->{RaiseError}) {
             croak "DBI connect failed: $error";
         }
@@ -104,7 +104,7 @@ sub connect {
         }
         return 1;  # Return 1 for FAILURE
     }
-    
+
     # Success - configure handle
     # CPANBridge now returns unwrapped results directly (Issue #1 fix)
     my $connection_id = $result->{connection_id};
@@ -117,10 +117,83 @@ sub connect {
     $self->{connection_id} = $connection_id;
     $self->{connected} = 1;
     $self->{Active} = 1;
-    
+
     # Store as persistent connection
     $persistent_dbh = $self;
-    
+
+    return $self;
+}
+
+# DBI->connect_cached - Phase 1 connection caching support
+sub connect_cached {
+    my ($class, $dsn, $username, $password, $attr) = @_;
+
+    # Handle alternate connection pattern
+    if (ref($dsn) eq 'HASH') {
+        $attr = $dsn;
+        $dsn = $username;
+        $username = '';
+        $password = '';
+    }
+
+    # Handle Oracle TNS pattern
+    if ($dsn eq "dbi:Oracle:" && $username && $username =~ /(.+)\@(.+)/) {
+        my ($user, $sid) = ($1, $2);
+        $dsn = "dbi:Oracle:sid=$sid";
+        $username = $user;
+    }
+
+    my $self = $class->new(
+        dsn => $dsn,
+        username => $username,
+        password => $password
+    );
+
+    # Set connection attributes
+    if ($attr && ref($attr) eq 'HASH') {
+        $self->{AutoCommit} = $attr->{AutoCommit} if exists $attr->{AutoCommit};
+        $self->{RaiseError} = $attr->{RaiseError} if exists $attr->{RaiseError};
+        $self->{PrintError} = $attr->{PrintError} if exists $attr->{PrintError};
+    }
+
+    # Database type is always Oracle
+    my $db_type = 'oracle';
+
+    # Connect via Python bridge with caching
+    my $result = $self->call_python('database', 'connect_cached', {
+        dsn => $dsn,
+        username => $username,
+        password => $password,
+        db_type => $db_type,
+        options => $attr || {}
+    });
+
+    if (!$result || !$result->{success}) {
+        my $error = $result ? $result->{error} : "Unknown connection error";
+        $self->_set_error($error);
+
+        if ($self->{RaiseError}) {
+            croak "DBI connect_cached failed: $error";
+        }
+        if ($self->{PrintError}) {
+            warn "DBI connect_cached failed: $error";
+        }
+        return 1;  # Return 1 for FAILURE
+    }
+
+    # Success - configure handle
+    my $connection_id = $result->{connection_id};
+
+    unless ($connection_id) {
+        $self->_set_error("Connection ID not found in result");
+        return 1;  # Return 1 for FAILURE
+    }
+
+    $self->{connection_id} = $connection_id;
+    $self->{connected} = 1;
+    $self->{Active} = 1;
+    $self->{cached} = $result->{cached} || 0;
+
     return $self;
 }
 
@@ -162,25 +235,26 @@ sub prepare {
     return $sth;
 }
 
-# $dbh->do - for direct SQL execution
+# $dbh->do - for direct SQL execution (Phase 1 - DBI compatibility)
 sub do {
     my ($self, $sql, $attr, @bind_values) = @_;
-    
+
     unless ($self->{connected}) {
         $self->_set_error("Not connected to database");
         return undef;
     }
-    
-    my $result = $self->call_python('database', 'execute_immediate', {
+
+    # Use do_statement for DBI compatibility (Phase 1)
+    my $result = $self->call_python('database', 'do_statement', {
         connection_id => $self->{connection_id},
         sql => $sql,
         bind_values => \@bind_values
     });
-    
+
     if (!$result || !$result->{success}) {
         my $error = $result ? $result->{error} : "Execute failed";
         $self->_set_error($error);
-        
+
         if ($self->{RaiseError}) {
             croak "Database operation failed: $error";
         }
@@ -395,7 +469,8 @@ sub new {
         executed => 0,
         finished => 0,
         bind_params => {},    # For bind_param() support
-        
+        out_params => {},     # Phase 1: For bind_param_inout() support
+
         # DBI-compatible attributes
         Active => 1,
         err => undef,
@@ -407,7 +482,7 @@ sub new {
         TYPE => [],           # Column types
         rows => 0,            # Row count (used for conditionals)
     };
-    
+
     bless $self, $class;
     return $self;
 }
@@ -415,13 +490,47 @@ sub new {
 # $sth->bind_param - for stored procedures
 sub bind_param {
     my ($self, $param, $value, $attr) = @_;
-    
+
     # Store bind parameter for later use
     $self->{bind_params}->{$param} = {
         value => $value,
         attr => $attr
     };
-    
+
+    return 1;
+}
+
+# $sth->bind_param_inout - Phase 1: OUT/INOUT parameter support
+sub bind_param_inout {
+    my ($self, $param, $value_ref, $max_len, $attr) = @_;
+
+    unless (ref($value_ref)) {
+        $self->_set_error("bind_param_inout requires a scalar reference");
+        return undef;
+    }
+
+    # Default size and attribute handling
+    $max_len ||= 4000;
+    $attr ||= {};
+
+    # Call Python helper to bind OUT/INOUT parameter
+    my $result = $self->{parent}->call_python('database', 'bind_param_inout', {
+        statement_id => $self->{statement_id},
+        param_name => $param,
+        initial_value => $$value_ref,
+        size => $max_len,
+        param_type => $attr
+    });
+
+    if (!$result || !$result->{success}) {
+        my $error = $result ? $result->{error} : "bind_param_inout failed";
+        $self->_set_error($error);
+        return undef;
+    }
+
+    # Track OUT parameter reference for later update
+    $self->{out_params}->{$param} = $value_ref;
+
     return 1;
 }
 
@@ -489,12 +598,31 @@ sub execute {
     my $rows_affected = $result->{rows_affected} // 0;
     $self->{rows} = $rows_affected;
 
+    # Phase 1: Retrieve OUT/INOUT parameter values after execution
+    if (%{$self->{out_params}}) {
+        my $out_result = $self->{parent}->call_python('database', 'get_out_params', {
+            statement_id => $self->{statement_id}
+        });
+
+        if ($out_result && $out_result->{success}) {
+            my $out_values = $out_result->{out_params} || {};
+
+            # Update Perl variable references with OUT parameter values
+            for my $param_name (keys %{$self->{out_params}}) {
+                my $value_ref = $self->{out_params}->{$param_name};
+                if (exists $out_values->{$param_name}) {
+                    $$value_ref = $out_values->{$param_name};
+                }
+            }
+        }
+    }
+
     # Return DBI-compatible value
-    
+
     if ($rows_affected == 0) {
         return "0E0";  # DBI standard for zero rows
     }
-    
+
     return $rows_affected;
 }
 
@@ -803,12 +931,15 @@ dependencies by using Python drivers underneath. It supports all DBI
 functionality found in your Perl scripts including:
 
 - Oracle database connections (with password and Kerberos authentication)
+- Connection caching (connect_cached) - Phase 1
 - All fetch methods (fetchrow_array, fetchrow_hashref, etc.)
 - Statement handle attributes (NAME_uc, NUM_OF_FIELDS, rows)
 - Stored procedures with bind parameters
+- OUT/INOUT parameter support (bind_param_inout) - Phase 1
 - Transaction control
 - DBI utility functions (neat_list, neat)
-- Error handling with RaiseError/PrintError
+- Error handling with RaiseError/PrintError and errstr() - Phase 1
+- Oracle CLOB support - Phase 1
 
 =head1 METHODS
 
@@ -817,14 +948,19 @@ All standard DBI methods are supported with identical interfaces:
 =head2 Database Handle Methods
 
 - connect() - Establish database connection
+- connect_cached() - Cached connection (Phase 1)
 - prepare() - Prepare SQL statement
+- do() - Execute immediate SQL statement
 - commit() - Commit transaction
 - rollback() - Rollback transaction
 - disconnect() - Close connection
+- errstr() - Get last error message (Phase 1)
 
 =head2 Statement Handle Methods
 
 - execute() - Execute prepared statement
+- bind_param() - Bind input parameter
+- bind_param_inout() - Bind OUT/INOUT parameter (Phase 1)
 - fetchrow_array() - Fetch row as array
 - fetchrow_arrayref() - Fetch row as array reference
 - fetchrow_hashref() - Fetch row as hash reference
@@ -832,6 +968,7 @@ All standard DBI methods are supported with identical interfaces:
 - fetchall_arrayref() - Fetch all rows as array references
 - fetchall_hashref() - Fetch all rows as hash references
 - finish() - Finish statement handle
+- errstr() - Get last error message (Phase 1)
 
 =head1 MIGRATION
 
