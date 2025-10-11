@@ -69,8 +69,8 @@ CLEANUP_INTERVAL = int(os.environ.get('CPAN_BRIDGE_CLEANUP_INTERVAL', '300'))  #
 # Resource management configuration
 MAX_MEMORY_MB = int(os.environ.get('CPAN_BRIDGE_MAX_MEMORY_MB', '1024'))  # 1GB
 MAX_CPU_PERCENT = float(os.environ.get('CPAN_BRIDGE_MAX_CPU_PERCENT', '200.0'))  # 200% (allows for multi-core burst)
-MAX_REQUESTS_PER_MINUTE = int(os.environ.get('CPAN_BRIDGE_MAX_REQUESTS_PER_MINUTE', '1000'))
-MAX_CONCURRENT_REQUESTS = int(os.environ.get('CPAN_BRIDGE_MAX_CONCURRENT_REQUESTS', '50'))
+MAX_REQUESTS_PER_MINUTE = int(os.environ.get('CPAN_BRIDGE_MAX_REQUESTS_PER_MINUTE', '2000'))  # Increased from 1000
+MAX_CONCURRENT_REQUESTS = int(os.environ.get('CPAN_BRIDGE_MAX_CONCURRENT_REQUESTS', '100'))  # Increased from 50
 STALE_CONNECTION_TIMEOUT = int(os.environ.get('CPAN_BRIDGE_STALE_TIMEOUT', '300'))  # 5 minutes
 RESOURCE_CHECK_INTERVAL = int(os.environ.get('CPAN_BRIDGE_RESOURCE_CHECK_INTERVAL', '60'))  # 1 minute
 
