@@ -242,10 +242,35 @@ sub get {
 
 # Direct POST method (from your HpsmTicket.pm usage)
 sub post {
-    my ($self, $url, %args) = @_;
-    
+    my ($self, $url, $data_or_args, %extra_args) = @_;
+
     croak "URL required" unless $url;
-    
+
+    # Handle LWP::UserAgent pattern: $ua->post($url, \%form_data)
+    # Check if second argument is a hashref (LWP form data pattern)
+    my %args;
+    if (ref($data_or_args) eq 'HASH') {
+        # Convert hashref to form-encoded string
+        my @pairs;
+        while (my ($key, $value) = each %$data_or_args) {
+            # Simple URL encoding for form parameters
+            my $encoded_key = _uri_escape($key);
+            my $encoded_value = _uri_escape($value);
+            push @pairs, "$encoded_key=$encoded_value";
+        }
+        my $form_content = join('&', @pairs);
+
+        # Set up args for form-encoded POST
+        %args = (
+            Content_Type => 'application/x-www-form-urlencoded',
+            Content => $form_content,
+            %extra_args  # Allow additional args after hashref
+        );
+    } else {
+        # Standard named parameter pattern: $ua->post($url, Content => ..., Content_Type => ...)
+        %args = ($data_or_args, %extra_args);
+    }
+
     # Prepare request parameters
     my $params = {
         method => 'POST',
@@ -257,16 +282,16 @@ sub post {
         timeout => $self->{timeout},
         verify_ssl => $self->{ssl_verify_hostname},
     };
-    
+
     # Handle Content_Type parameter (your usage pattern)
     if ($args{Content_Type}) {
         $params->{headers}->{'Content-Type'} = $args{Content_Type};
     }
-    
+
     # Handle Content parameter (your usage pattern)
     if (defined $args{Content}) {
         $params->{content} = $args{Content};
-        
+
         # If content type is form-encoded, mark it appropriately
         if (($params->{headers}->{'Content-Type'} || '') eq 'application/x-www-form-urlencoded') {
             $params->{form_encoded_content} = $args{Content};
@@ -368,6 +393,18 @@ sub status {
     }
     
     return undef;
+}
+
+# Helper function for URL encoding (simple implementation for form data)
+sub _uri_escape {
+    my $str = shift;
+    return '' unless defined $str;
+
+    # Encode special characters for application/x-www-form-urlencoded
+    # This is a simplified version - for production use, could use URI::Escape if available
+    $str =~ s/([^A-Za-z0-9\-_.~])/sprintf("%%%02X", ord($1))/ge;
+
+    return $str;
 }
 
 # Export compatibility
