@@ -245,6 +245,7 @@ class RequestValidator:
             "openssh": ["new", "scp_put", "get_error", "disconnect", "cleanup_connection"],
             "email_helper": ["send_email", "send_html_email", "validate_email"],
             "smtp_helper": ["new", "mail", "to", "data", "datasend", "quit", "get_connection_info", "get_pool_stats", "cleanup_stale_connections"],
+            "ftp_helper": ["new", "login", "cwd", "pwd", "dir", "binary", "ascii", "get", "put", "delete", "rename", "message", "quit", "get_connection_info", "get_pool_stats", "cleanup_stale_connections"],
             "logging_helper": ["log_message", "log_error", "log_warning", "log_debug"],
             "excel": ["create_workbook", "add_worksheet", "write_cell", "close_workbook"],
             "sftp": ["connect", "put", "get", "delete", "list_files", "disconnect"],
@@ -1204,6 +1205,7 @@ class CPANBridgeDaemon:
             'openssh',         # SSH/SCP operations (Net::OpenSSH replacement)
             'email_helper',    # Email sending
             'smtp_helper',     # SMTP operations (Net::SMTP replacement)
+            'ftp_helper',      # FTP operations (Net::FTP replacement)
             'logging_helper',  # Logging operations
             'excel',           # Excel file operations
             'sftp',            # SFTP operations

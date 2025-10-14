@@ -442,7 +442,7 @@ def cleanup_stale_connections() -> Dict[str, Any]:
     """
     Clean up connections older than 5 minutes (300 seconds)
 
-    Called periodically by daemon or manually for testing
+    Called periodically by daemon (via cleanup_stale_resources) or manually for testing
 
     Returns:
         Dict with cleanup statistics
@@ -574,6 +574,16 @@ def _cleanup_connection(connection_id: str) -> None:
     with _connections_lock:
         if connection_id in _smtp_connections:
             del _smtp_connections[connection_id]
+
+
+def cleanup_stale_resources():
+    """
+    Cleanup function called by daemon's periodic cleanup thread.
+
+    This is the standard interface that the CPAN daemon expects from helper modules.
+    It delegates to cleanup_stale_connections() for actual cleanup work.
+    """
+    cleanup_stale_connections()
 
 
 # Module initialization
