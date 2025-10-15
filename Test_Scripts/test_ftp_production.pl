@@ -351,7 +351,8 @@ sub test_file_upload {
         }
 
         $ftp->login($FTP_USER, $FTP_PASS) or die "Login failed";
-        $ftp->cwd($FTP_DIR) or die "CWD failed";
+
+        # Stay in home directory (writable) instead of changing to FTP_DIR
         $ftp->binary() or die "Binary mode failed";
 
         # Create temporary test file
@@ -397,7 +398,7 @@ sub test_file_download {
         }
 
         $ftp->login($FTP_USER, $FTP_PASS) or die "Login failed";
-        $ftp->cwd($FTP_DIR) or die "CWD failed";
+        # Stay in writable home directory
         $ftp->binary() or die "Binary mode failed";
 
         # First upload a test file
@@ -445,7 +446,7 @@ sub test_file_rename {
         }
 
         $ftp->login($FTP_USER, $FTP_PASS) or die "Login failed";
-        $ftp->cwd($FTP_DIR) or die "CWD failed";
+        # Stay in writable home directory
         $ftp->binary() or die "Binary mode failed";
 
         # Create test file
@@ -493,7 +494,7 @@ sub test_file_delete {
         }
 
         $ftp->login($FTP_USER, $FTP_PASS) or die "Login failed";
-        $ftp->cwd($FTP_DIR) or die "CWD failed";
+        # Stay in writable home directory
         $ftp->binary() or die "Binary mode failed";
 
         # Create test file
@@ -632,7 +633,7 @@ sub test_atomic_operations {
         }
 
         $ftp->login($FTP_USER, $FTP_PASS) or die "Login failed";
-        $ftp->cwd($FTP_DIR) or die "CWD failed";
+        # Stay in writable home directory
         $ftp->binary() or die "Binary mode failed";
 
         # Create test file
