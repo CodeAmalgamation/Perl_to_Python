@@ -87,10 +87,14 @@ your_project/
 ├── DateTimeHelper.pm                # DateTime operations
 ├── HTTPHelper.pm                    # HTTP operations
 ├── SFTPHelper.pm                    # SFTP file transfers
+├── SSHHelper.pm                     # SSH operations (Net::OpenSSH replacement)
+├── LockFileHelper.pm                # File locking with NFS support
 ├── LogHelper.pm                     # Logging operations
 ├── ExcelHelper.pm                   # Excel file generation
 ├── CryptHelper.pm                   # Encryption operations
 ├── Test_Scripts/test_*.pl           # Test scripts
+├── Test_Scripts/load_test_throttling.pl    # Comprehensive load testing
+├── Test_Scripts/quick_load_test.pl         # Quick throttling test
 ├── BASELINE_TESTING_STORIES.md      # Core functionality tests
 ├── TESTING_STORIES.md               # Comprehensive test documentation
 ├── USER_GUIDE.md                    # User documentation
@@ -104,8 +108,10 @@ your_project/
         ├── xml.py                   # XML processing backend
         ├── xpath.py                 # XPath processing backend
         ├── datetime_helper.py       # DateTime backend
-        ├── http.py                  # HTTP backend
+        ├── http_helper.py           # HTTP backend
         ├── sftp.py                  # SFTP backend
+        ├── openssh.py               # SSH backend
+        ├── lockfile.py              # File locking backend
         ├── logging_helper.py        # Logging backend
         ├── excel.py                 # Excel backend
         └── crypto.py                # Encryption backend
@@ -202,6 +208,51 @@ perl -e "use CPANBridge; my \$b = CPANBridge->new(); print \$b->system_info();"
 # Send SIGTERM or Ctrl+C to daemon process
 kill -TERM $(pgrep -f cpan_daemon)
 ```
+
+## Recent Enhancements (October 2025)
+
+### Request Throttling & Resource Management
+The daemon now includes adaptive throttling to prevent resource exhaustion:
+
+**Features:**
+- **Concurrent Request Limit**: 100 simultaneous connections
+- **Rate Limiting**: 2000 requests per minute
+- **Memory Management**: 1024 MB limit with automatic monitoring
+- **CPU Throttling**: 200% multi-core limit
+- **Adaptive Backpressure**: Graduated delays (0ms → 100ms → 1000ms)
+
+**Configuration:**
+```bash
+export CPAN_BRIDGE_MAX_CONCURRENT_REQUESTS=100
+export CPAN_BRIDGE_MAX_REQUESTS_PER_MINUTE=2000
+export CPAN_BRIDGE_MAX_MEMORY_MB=1024
+export CPAN_BRIDGE_MAX_CPU_PERCENT=200
+```
+
+**Documentation:** See `Documentation/Request_Throttling_Implementation.md` and `Documentation/Load_Testing_Guide.md`
+
+### DBI Enhancements
+**Phase 1 & 2 Complete:**
+- Kerberos authentication support for Oracle databases
+- Bind parameter fixes (DBI `?` → Oracle `:N` conversion)
+- Transaction support (commit, rollback, AutoCommit)
+- Enhanced error handling with proper database error propagation
+- Connection pooling for improved performance
+
+**Testing:** See `Documentation/DBI_Testing_Guide.md` and `Documentation/DBI_Testing_Guide_Live_Database.md`
+
+### HTTP Module Enhancements
+**100% LWP::UserAgent Compatibility:**
+- Added hashref POST parameter support: `$ua->post($url, \%form_data)`
+- URL encoding without external dependencies (RFC 3986 compliant)
+- Full compatibility with all 6 production files using LWP/Mechanize
+
+**Branch:** feature/http
+
+### SSH & Locking Enhancements
+- **Net::OpenSSH** replacement using paramiko
+- **LockFile::Simple** replacement with NFS-safe locking
+- Daemon state persistence with security exemptions
 
 ## Usage Examples
 
@@ -346,6 +397,10 @@ perl Test_Scripts/datetime_test_minimal.pl     # DateTime operations
 # Daemon-specific tests
 perl Test_Scripts/test_enhanced_validation.pl  # Security validation
 perl Test_Scripts/test_operational_monitoring.pl # Monitoring features
+
+# Load testing and throttling
+perl Test_Scripts/quick_load_test.pl           # Quick throttling test (~1 min)
+perl Test_Scripts/load_test_throttling.pl      # Full load test (~8-10 min)
 ```
 
 ### Run All Tests
@@ -465,19 +520,42 @@ type %TEMP%\cpan_security.log
 |----------------|-------------|---------|---------|
 | DBI | DBIHelper.pm | database.py | ✅ Production |
 | Mail::Sender | MailHelper.pm | email_helper.py | ✅ Production |
-| XML::Simple | XMLHelper.pm | xml.py | ✅ Production |
+| XML::Simple | XMLHelper.pm | xml_helper.py | ✅ Production |
 | XML::XPath | XPathHelper.pm | xpath.py | ✅ Production |
 | Date::Parse | DateHelper.pm | dates.py | ✅ Production |
 | DateTime | DateTimeHelper.pm | datetime_helper.py | ✅ Production |
-| LWP::UserAgent | HTTPHelper.pm | http.py | ✅ Production |
-| WWW::Mechanize | HTTPHelper.pm | http.py | ✅ Production |
+| LWP::UserAgent | HTTPHelper.pm | http_helper.py | ✅ Production |
+| WWW::Mechanize | HTTPHelper.pm | http_helper.py | ✅ Production |
 | Net::SFTP::Foreign | SFTPHelper.pm | sftp.py | ✅ Production |
+| Net::OpenSSH | SSHHelper.pm | openssh.py | ✅ Production |
+| LockFile::Simple | LockFileHelper.pm | lockfile.py | ✅ Production |
 | Log::Log4perl | LogHelper.pm | logging_helper.py | ✅ Production |
 | Excel::Writer::XLSX | ExcelHelper.pm | excel.py | ✅ Production |
 | Crypt::CBC | CryptHelper.pm | crypto.py | ✅ Production |
 
 ### 🎉 **MIGRATION COMPLETE!**
 **All major CPAN dependencies eliminated** - Ready for RHEL 9 deployment!
+
+## Documentation
+
+### Analysis Reports
+Comprehensive usage analysis for migration planning:
+- `Documentation/LWP_Mechanize_Compatibility_Report.md` - HTTP module analysis
+- `Documentation/Inline_Module_Usage_Analysis.md` - Inline::Java usage (Actuate)
+- `Documentation/Net_SFTP_Foreign_Usage_Analysis_Report.md` - SFTP usage patterns
+- `Documentation/Excel_Write_XLSX_Usage Analysis Report` - Excel generation patterns
+
+### Implementation Guides
+- `Documentation/Request_Throttling_Implementation.md` - Throttling architecture
+- `Documentation/Load_Testing_Guide.md` - Load testing procedures
+- `Documentation/DBI_Testing_Guide.md` - Database testing guide
+- `Documentation/DBI_Testing_Guide_Live_Database.md` - Live DB testing with Kerberos
+
+### User Documentation
+- `USER_GUIDE.md` - Complete user guide
+- `PRODUCTION_OPERATIONS.md` - Operations and troubleshooting
+- `BASELINE_TESTING_STORIES.md` - Core functionality tests
+- `TESTING_STORIES.md` - Comprehensive test coverage
 
 ## Contributing
 
@@ -498,9 +576,10 @@ For issues or questions:
 
 ---
 
-**Migration Status**: ✅ **COMPLETE** - All 12 major CPAN modules replaced (100%)
+**Migration Status**: ✅ **COMPLETE** - All 13 major CPAN modules replaced (100%)
 **Architecture**: 🚀 **Enhanced** - High-performance daemon mode with 50x-100x speedup
 **Security**: 🔒 **Hardened** - Enhanced validation, security logging, and monitoring
+**Performance**: ⚡ **Optimized** - Request throttling with 100 concurrent/2000 req/min capacity
 **Documentation**: 📚 **Complete** - User guides, operations manual, and test stories
-**Last Updated**: September 2025
+**Last Updated**: October 2025
 **RHEL 9 Ready**: 🚀 Production deployment ready
