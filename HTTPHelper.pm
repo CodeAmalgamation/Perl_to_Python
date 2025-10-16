@@ -185,22 +185,11 @@ sub request {
     }
     
     # Make the request via Python
-    my $result = $self->call_python('http', 'lwp_request', $params);
-    
-    if ($result->{success}) {
-        return HTTPHelper::Response->new($result->{result});
-    } else {
-        # Return error response (matches LWP::UserAgent behavior)
-        return HTTPHelper::Response->new({
-            success => 0,
-            status_code => 500,
-            reason => 'Internal Server Error',
-            error => $result->{error},
-            content => '',
-            status_line => "500 Internal Server Error",
-            headers => {},
-        });
-    }
+    my $result = $self->call_python('http_helper', 'lwp_request', $params);
+
+    # Return response regardless of success status
+    # HTTP errors (404, 500, etc.) are valid responses that should be returned
+    return HTTPHelper::Response->new($result);
 }
 
 # Direct GET method
@@ -222,22 +211,11 @@ sub get {
     };
     
     # Make the request via Python
-    my $result = $self->call_python('http', 'lwp_request', $params);
-    
-    if ($result->{success}) {
-        return HTTPHelper::Response->new($result->{result});
-    } else {
-        # Return error response
-        return HTTPHelper::Response->new({
-            success => 0,
-            status_code => 500,
-            reason => 'Internal Server Error',
-            error => $result->{error},
-            content => '',
-            status_line => "500 Internal Server Error",
-            headers => {},
-        });
-    }
+    my $result = $self->call_python('http_helper', 'lwp_request', $params);
+
+    # Return response regardless of success status
+    # HTTP errors (404, 500, etc.) are valid responses that should be returned
+    return HTTPHelper::Response->new($result);
 }
 
 # Direct POST method (from your HpsmTicket.pm usage)
@@ -299,22 +277,11 @@ sub post {
     }
     
     # Make the request via Python
-    my $result = $self->call_python('http', 'lwp_request', $params);
-    
-    if ($result->{success}) {
-        return HTTPHelper::Response->new($result->{result});
-    } else {
-        # Return error response
-        return HTTPHelper::Response->new({
-            success => 0,
-            status_code => 500,
-            reason => 'Internal Server Error',
-            error => $result->{error},
-            content => '',
-            status_line => "500 Internal Server Error",
-            headers => {},
-        });
-    }
+    my $result = $self->call_python('http_helper', 'lwp_request', $params);
+
+    # Return response regardless of success status
+    # HTTP errors (404, 500, etc.) are valid responses that should be returned
+    return HTTPHelper::Response->new($result);
 }
 
 # WWW::Mechanize compatibility methods
@@ -342,10 +309,23 @@ sub status {
     return undef;
 }
 
+# Helper function for URL encoding (simple implementation for form data)
+sub _uri_escape {
+    my $str = shift;
+    return '' unless defined $str;
+
+    # Encode special characters for application/x-www-form-urlencoded
+    # This is a simplified version - for production use, could use URI::Escape if available
+    $str =~ s/([^A-Za-z0-9\-_.~])/sprintf("%%%02X", ord($1))/ge;
+
+    return $str;
+}
+
 # WWW::Mechanize compatibility wrapper class
 package HTTPHelper::Mechanize;
 use strict;
 use warnings;
+use Carp;
 use base 'HTTPHelper';
 
 sub new {
@@ -393,18 +373,6 @@ sub status {
     }
     
     return undef;
-}
-
-# Helper function for URL encoding (simple implementation for form data)
-sub _uri_escape {
-    my $str = shift;
-    return '' unless defined $str;
-
-    # Encode special characters for application/x-www-form-urlencoded
-    # This is a simplified version - for production use, could use URI::Escape if available
-    $str =~ s/([^A-Za-z0-9\-_.~])/sprintf("%%%02X", ord($1))/ge;
-
-    return $str;
 }
 
 # Export compatibility
