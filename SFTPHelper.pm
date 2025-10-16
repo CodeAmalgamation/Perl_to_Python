@@ -15,10 +15,22 @@ use warnings;
 use base 'CPANBridge';
 
 sub new {
-    my ($class, %args) = @_;
-    
+    my $class = shift;
+    my %args;
+
+    # Handle Net::SFTP::Foreign calling pattern: new($host, %options)
+    if (@_ && $_[0] && !ref($_[0]) && $_[0] !~ /^(host|user|password|port|timeout|more)$/) {
+        # First argument is host (positional)
+        my $host = shift;
+        %args = @_;
+        $args{host} = $host;
+    } else {
+        # Named parameters only: new(host => $host, ...)
+        %args = @_;
+    }
+
     my $self = $class->SUPER::new(%args);
-    
+
     # Net::SFTP::Foreign specific configuration
     $self->{host} = $args{host} || '';
     $self->{user} = $args{user} || '';
@@ -29,13 +41,13 @@ sub new {
     $self->{connected} = 0;
     $self->{current_dir} = undef;
     $self->{last_error} = undef;
-    
+
     # Parse SSH options from 'more' parameter
     $self->{ssh_options} = $self->_parse_ssh_options($args{more});
-    
+
     # Establish connection
     $self->_connect();
-    
+
     return $self;
 }
 
@@ -93,16 +105,18 @@ sub _connect {
 
     # Connect via Python backend using 'new' function
     my $result = $self->call_python('sftp', 'new', $params);
-    
+
     if ($result->{success}) {
         $self->{connected} = 1;
         $self->{session_id} = $result->{result}->{session_id};
         $self->{current_dir} = $result->{result}->{initial_dir} || '/';
         $self->{last_error} = undef;
     } else {
+        # Connection failed - set error but don't die (Net::SFTP::Foreign pattern)
         $self->{connected} = 0;
-        $self->{last_error} = $result->{error};
-        die "unable to connect to remote host $self->{host}: $result->{error}";
+        $self->{session_id} = undef;
+        $self->{current_dir} = undef;
+        $self->{last_error} = "SFTP connection failed: $result->{error}";
     }
 }
 
@@ -119,50 +133,61 @@ sub put {
         session_id => $self->{session_id},
         local_file => $local_file,
         remote_file => $remote_file,
-        current_dir => $self->{current_dir},
     };
     
     # Execute put operation via Python backend
     my $result = $self->call_python('sftp', 'put', $params);
-    
+
+    # Result is wrapped: {success => 1, result => {...}} or {success => 0, error => ...}
     if ($result->{success}) {
+        # Success case
         $self->{last_error} = undef;
         return 1;  # Success
     } else {
+        # Error case
         $self->{last_error} = $result->{error};
-        return 0;  # Failure (compatible with your error handling)
+        return 0;  # Failure
     }
 }
 
 # Directory listing with pattern support (your ls usage)
 sub ls {
-    my ($self, $remote_dir, %args) = @_;
-    
+    my $self = shift;
+
     croak "Not connected to SFTP server" unless $self->{connected};
-    
+
     # Handle different calling patterns
     # ls() - list current directory
-    # ls($dir) - list specific directory  
+    # ls($dir) - list specific directory
     # ls(wanted => qr/pattern/) - list with pattern in current dir
     # ls($dir, wanted => qr/pattern/) - list with pattern in specific dir
-    
+
     my $dir_to_list;
     my $wanted_pattern;
-    
-    if (defined $remote_dir && !ref($remote_dir)) {
-        # ls($dir) or ls($dir, wanted => ...)
-        $dir_to_list = $remote_dir;
+
+    # Parse arguments
+    if (@_ == 0) {
+        # ls() - no arguments
+        $dir_to_list = $self->{current_dir};
+    } elsif (@_ == 1 && !ref($_[0])) {
+        # ls($dir) - single directory argument
+        $dir_to_list = $_[0];
+    } elsif (@_ == 1 && ref($_[0]) eq 'Regexp') {
+        # ls(qr/pattern/) - single regex argument (unusual but possible)
+        $dir_to_list = $self->{current_dir};
+        $wanted_pattern = $_[0];
+    } elsif (@_ % 2 == 0) {
+        # Even number of args - it's a hash
+        my %args = @_;
+        $dir_to_list = $self->{current_dir};
         $wanted_pattern = $args{wanted};
-    } elsif (defined $remote_dir && ref($remote_dir) eq 'Regexp') {
-        # ls(wanted => qr/pattern/) - first arg is actually the pattern
-        $dir_to_list = $self->{current_dir};
-        $wanted_pattern = $remote_dir;
-    } elsif (defined $args{wanted}) {
-        # ls(wanted => qr/pattern/)
-        $dir_to_list = $self->{current_dir};
+    } elsif (@_ >= 2 && @_ % 2 == 1) {
+        # Odd number >= 3: $dir, key => value, ...
+        $dir_to_list = shift;
+        my %args = @_;
         $wanted_pattern = $args{wanted};
     } else {
-        # ls() - list current directory
+        # Fallback
         $dir_to_list = $self->{current_dir};
     }
     
@@ -187,11 +212,15 @@ sub ls {
     
     # Execute ls operation via Python backend
     my $result = $self->call_python('sftp', 'ls', $params);
-    
+
+    # Result is wrapped: {success => 1, result => [entries]} or {success => 0, error => ...}
+    # Note: result is directly the array, not {entries: [...]}
     if ($result->{success}) {
+        # Success case
         $self->{last_error} = undef;
-        return $result->{result}->{entries};  # Returns array ref of file entries
+        return $result->{result};  # Returns array ref of file entries directly
     } else {
+        # Error case
         $self->{last_error} = $result->{error};
         return [];  # Return empty list on error
     }
@@ -210,17 +239,19 @@ sub rename {
         session_id => $self->{session_id},
         old_name => $old_name,
         new_name => $new_name,
-        current_dir => $self->{current_dir},
         overwrite => $args{overwrite} || 0,
     };
     
     # Execute rename operation via Python backend
     my $result = $self->call_python('sftp', 'rename', $params);
-    
+
+    # Result is wrapped: {success => 1, result => {...}} or {success => 0, error => ...}
     if ($result->{success}) {
+        # Success case
         $self->{last_error} = undef;
         return 1;  # Success
     } else {
+        # Error case
         $self->{last_error} = $result->{error};
         return 0;  # Failure
     }
@@ -241,12 +272,15 @@ sub setcwd {
     
     # Execute setcwd operation via Python backend
     my $result = $self->call_python('sftp', 'setcwd', $params);
-    
+
+    # Result is wrapped: {success => 1, result => {...}} or {success => 0, error => ...}
     if ($result->{success}) {
-        $self->{current_dir} = $result->{result}->{new_dir};
+        # Success case
+        $self->{current_dir} = $result->{result}->{current_dir};
         $self->{last_error} = undef;
         return 1;  # Success
     } else {
+        # Error case
         $self->{last_error} = $result->{error};
         return 0;  # Failure
     }
@@ -307,15 +341,17 @@ sub get {
         session_id => $self->{session_id},
         remote_file => $remote_file,
         local_file => $local_file,
-        current_dir => $self->{current_dir},
     };
     
     my $result = $self->call_python('sftp', 'get', $params);
-    
+
+    # Result is wrapped: {success => 1, result => {...}} or {success => 0, error => ...}
     if ($result->{success}) {
+        # Success case
         $self->{last_error} = undef;
         return 1;
     } else {
+        # Error case
         $self->{last_error} = $result->{error};
         return 0;
     }
@@ -323,22 +359,24 @@ sub get {
 
 sub mkdir {
     my ($self, $remote_dir) = @_;
-    
+
     croak "Not connected to SFTP server" unless $self->{connected};
     croak "Remote directory required" unless $remote_dir;
-    
+
     my $params = {
         session_id => $self->{session_id},
         remote_dir => $remote_dir,
-        current_dir => $self->{current_dir},
     };
-    
+
     my $result = $self->call_python('sftp', 'mkdir', $params);
-    
+
+    # Result is wrapped: {success => 1, result => {...}} or {success => 0, error => ...}
     if ($result->{success}) {
+        # Success case
         $self->{last_error} = undef;
         return 1;
     } else {
+        # Error case
         $self->{last_error} = $result->{error};
         return 0;
     }
@@ -346,22 +384,24 @@ sub mkdir {
 
 sub remove {
     my ($self, $remote_file) = @_;
-    
+
     croak "Not connected to SFTP server" unless $self->{connected};
     croak "Remote file required" unless $remote_file;
-    
+
     my $params = {
         session_id => $self->{session_id},
         remote_file => $remote_file,
-        current_dir => $self->{current_dir},
     };
-    
+
     my $result = $self->call_python('sftp', 'remove', $params);
-    
+
+    # Result is wrapped: {success => 1, result => {...}} or {success => 0, error => ...}
     if ($result->{success}) {
+        # Success case
         $self->{last_error} = undef;
         return 1;
     } else {
+        # Error case
         $self->{last_error} = $result->{error};
         return 0;
     }
