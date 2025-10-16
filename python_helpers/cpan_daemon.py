@@ -248,7 +248,7 @@ class RequestValidator:
             "ftp_helper": ["new", "login", "cwd", "pwd", "dir", "binary", "ascii", "get", "put", "delete", "rename", "message", "quit", "get_connection_info", "get_pool_stats", "cleanup_stale_connections"],
             "logging_helper": ["log_message", "log_error", "log_warning", "log_debug"],
             "excel": ["create_workbook", "add_worksheet", "write_cell", "close_workbook"],
-            "sftp": ["connect", "put", "get", "delete", "list_files", "disconnect"],
+            "sftp": ["new", "setcwd", "cwd", "put", "get", "ls", "rename", "remove", "mkdir", "error", "is_connected", "disconnect"],
             # Administrative modules
             "test": ["ping", "health", "stats", "echo"],
             "system": ["info", "shutdown", "health", "stats", "performance", "connections",

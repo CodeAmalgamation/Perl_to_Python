@@ -35,11 +35,19 @@ def new(host: str, user: str, port: int = 22, timeout: int = 60,
     """
     try:
         # Parse SSH options from 'more' parameter
+        # Supports both patterns:
+        #   1. ['-i', '/path/to/key']  (production pattern)
+        #   2. ['-o', 'IdentityFile=/path/to/key']
         ssh_options = {}
         if more:
             i = 0
             while i < len(more):
-                if more[i] == "-o" and i + 1 < len(more):
+                if more[i] == "-i" and i + 1 < len(more):
+                    # -i flag: next argument is the identity file path
+                    ssh_options['identity_file'] = more[i + 1]
+                    i += 2
+                elif more[i] == "-o" and i + 1 < len(more):
+                    # -o flag: next argument is option=value
                     option = more[i + 1]
                     if "=" in option:
                         key, value = option.split("=", 1)
@@ -47,6 +55,7 @@ def new(host: str, user: str, port: int = 22, timeout: int = 60,
                             ssh_options['identity_file'] = value
                     i += 2
                 else:
+                    # Skip other options like '-v'
                     i += 1
 
         # Try paramiko first (most compatible)
@@ -111,6 +120,7 @@ def _connect_paramiko(host: str, user: str, port: int, timeout: int,
         'current_dir': initial_dir,
         'connected_at': time.time(),
         'last_error': None,
+        'connection_type': 'paramiko',
     }
 
     return {
