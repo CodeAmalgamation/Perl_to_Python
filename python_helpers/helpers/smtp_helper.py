@@ -354,8 +354,10 @@ def datasend(connection_id: str, data: Optional[str] = None) -> Dict[str, Any]:
         # Combine buffered data
         message = ''.join(conn['data_buffer'])
 
-        # Send message and end data mode
+        # Send message with proper SMTP DATA termination
+        # SMTP protocol requires ending with "\r\n.\r\n"
         smtp.send(message.encode())
+        smtp.send(b"\r\n.\r\n")  # Send end-of-data marker
         code, response = smtp.getreply()
 
         # Check response code (250 = message accepted)
